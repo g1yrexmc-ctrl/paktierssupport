@@ -1,0 +1,16 @@
+{
+  "name": "eclipsemc-bot",
+  "version": "1.0.0",
+  "description": "EclipseMC premium Discord moderation + ticket bot with web dashboard",
+  "main": "api_server.js",
+  "scripts": {
+    "start": "node api_server.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "discord.js": "^14.16.3",
+    "express": "^4.19.2"
+  }
+}
