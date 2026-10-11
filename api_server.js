@@ -5,6 +5,7 @@ require('dotenv').config();
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const crypto = require('node:crypto');
+const { gzipSync, gunzipSync } = require('node:zlib');
 const express = require('express');
 const session = require('express-session');
 const helmet = require('helmet');
@@ -34,6 +35,10 @@ const DATA_DIR = path.resolve(
 );
 const DB_FILE = path.join(DATA_DIR, 'database.json');
 const TRANSCRIPTS_DIR = path.join(DATA_DIR, 'transcripts');
+const BACKUP_FORMAT = 'eclipsemc-server-backup';
+const BACKUP_VERSION = 1;
+const MAX_BACKUP_FILE_BYTES = 9 * 1024 * 1024;
+const MAX_BACKUP_UNCOMPRESSED_BYTES = 48 * 1024 * 1024;
 const PORT = Number(process.env.PORT || 3000);
 const BOT_TOKEN = process.env.BOT_TOKEN;
 const CLIENT_ID = process.env.CLIENT_ID;
@@ -88,7 +93,7 @@ let commandRegistrationError = null;
 
 const COMMAND_NAMES = [
   'help', 'ban', 'kick', 'timeout', 'untimeout', 'warn', 'warnings', 'clear',
-  'slowmode', 'lock', 'unlock', 'modlogs', 'ticket',
+  'slowmode', 'lock', 'unlock', 'modlogs', 'ticket', 'ticketpanel', 'backup', 'back',
 ];
 
 function defaultGuildData() {
@@ -146,6 +151,164 @@ function persistDatabase() {
     await fs.rename(temporaryFile, DB_FILE);
   });
   return saveQueue;
+}
+
+function cloneJson(value) {
+  return JSON.parse(JSON.stringify(value));
+}
+
+function isTranscriptFilename(filename) {
+  return typeof filename === 'string' && /^ticket-[0-9]{15,25}-[0-9]+\.txt$/.test(filename);
+}
+
+async function buildGuildBackup(guild) {
+  await persistDatabase();
+  const guildData = cloneJson(getGuildData(guild.id));
+  const ticketTranscriptNames = new Set((guildData.tickets || [])
+    .map(ticket => ticket?.transcriptFile).filter(isTranscriptFilename));
+  const ticketChannelIds = new Set((guildData.tickets || [])
+    .map(ticket => String(ticket?.channelId || '')).filter(validSnowflake));
+  const transcripts = [];
+  const missingTranscriptFiles = [];
+  const filenames = await fs.readdir(TRANSCRIPTS_DIR).catch(() => []);
+
+  for (const filename of filenames) {
+    if (!isTranscriptFilename(filename)) continue;
+    let content;
+    try {
+      content = await fs.readFile(path.join(TRANSCRIPTS_DIR, filename), 'utf8');
+    } catch {
+      if (ticketTranscriptNames.has(filename)) missingTranscriptFiles.push(filename);
+      continue;
+    }
+    const channelId = filename.match(/^ticket-([0-9]{15,25})-/)?.[1] || '';
+    const serverMarker = new RegExp(`^Server: .*\\(${guild.id}\\)$`, 'm');
+    if (ticketTranscriptNames.has(filename) || ticketChannelIds.has(channelId) || serverMarker.test(content)) {
+      transcripts.push({ filename, content });
+    }
+  }
+  return {
+    format: BACKUP_FORMAT,
+    version: BACKUP_VERSION,
+    scope: 'guild',
+    guild: { id: guild.id, name: guild.name },
+    createdAt: new Date().toISOString(),
+    data: { guildData, transcripts, missingTranscriptFiles },
+  };
+}
+
+function normalizeBackupGuildData(input) {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) {
+    throw new Error('The backup does not contain valid server data.');
+  }
+  const defaults = defaultGuildData();
+  const result = { ...defaults, ...input };
+  if (!input.settings || typeof input.settings !== 'object' || Array.isArray(input.settings)) {
+    throw new Error('The backup has invalid server settings.');
+  }
+  result.settings = { ...defaults.settings, ...input.settings };
+  for (const key of ['logs', 'tickets', 'warnings', 'panels', 'disabledCommands']) {
+    if (!Array.isArray(result[key])) throw new Error(`The backup has invalid ${key} data.`);
+  }
+  if (!result.commandPermissions || typeof result.commandPermissions !== 'object' || Array.isArray(result.commandPermissions)) {
+    throw new Error('The backup has invalid command permission data.');
+  }
+  if (result.logs.length > 5000 || result.tickets.length > 5000 || result.warnings.length > 5000
+    || result.panels.length > 1000 || result.disabledCommands.length > 100) {
+    throw new Error('The backup contains unexpectedly large server data arrays.');
+  }
+  return result;
+}
+
+async function downloadBackupAttachment(attachment) {
+  if (!attachment || typeof attachment.url !== 'string') throw new Error('Attach a backup file made with /backup create.');
+  if (Number(attachment.size || 0) > MAX_BACKUP_FILE_BYTES) {
+    throw new Error('The backup file is too large to load. The maximum supported upload is 9 MiB.');
+  }
+  let parsedUrl;
+  try { parsedUrl = new URL(attachment.url); } catch { throw new Error('That attachment URL is invalid.'); }
+  const allowedHosts = new Set(['cdn.discordapp.com', 'media.discordapp.net', 'cdn.discordapp.net']);
+  if (parsedUrl.protocol !== 'https:' || !allowedHosts.has(parsedUrl.hostname)) {
+    throw new Error('Upload the backup as a Discord attachment, not an external link.');
+  }
+  const response = await fetch(parsedUrl, { signal: AbortSignal.timeout(20000) });
+  if (!response.ok) throw new Error(`Could not download the backup attachment (HTTP ${response.status}).`);
+  const declaredLength = Number(response.headers.get('content-length') || 0);
+  if (declaredLength > MAX_BACKUP_FILE_BYTES) throw new Error('The backup file is too large to load (maximum 9 MiB).');
+  const input = Buffer.from(await response.arrayBuffer());
+  if (input.length > MAX_BACKUP_FILE_BYTES) throw new Error('The backup file is too large to load (maximum 9 MiB).');
+
+  let jsonBuffer = input;
+  if (input.length >= 2 && input[0] === 0x1f && input[1] === 0x8b) {
+    try {
+      jsonBuffer = gunzipSync(input, { maxOutputLength: MAX_BACKUP_UNCOMPRESSED_BYTES });
+    } catch {
+      throw new Error('The compressed backup is invalid or expands beyond the supported size.');
+    }
+  }
+  if (jsonBuffer.length > MAX_BACKUP_UNCOMPRESSED_BYTES) throw new Error('The backup expands beyond the supported 48 MiB limit.');
+  try { return JSON.parse(jsonBuffer.toString('utf8')); } catch {
+    throw new Error('This file is not a valid EclipseMC backup JSON or compressed backup.');
+  }
+}
+
+async function restoreGuildBackup(guild, backup) {
+  if (!backup || typeof backup !== 'object' || backup.format !== BACKUP_FORMAT || backup.version !== BACKUP_VERSION) {
+    throw new Error('Unsupported backup format or version. Upload a file created by this version of /backup create.');
+  }
+  if (backup.scope !== 'guild' || backup.guild?.id !== guild.id) {
+    throw new Error('This backup belongs to a different Discord server. Run /back load in the server it was created for.');
+  }
+  const importedGuildData = normalizeBackupGuildData(backup.data?.guildData);
+  const transcriptEntries = backup.data?.transcripts;
+  if (!Array.isArray(transcriptEntries) || transcriptEntries.length > 5000) {
+    throw new Error('The backup contains invalid transcript data.');
+  }
+  const safeTranscripts = [];
+  const seen = new Set();
+  let transcriptBytes = 0;
+  for (const entry of transcriptEntries) {
+    if (!entry || !isTranscriptFilename(entry.filename) || typeof entry.content !== 'string') {
+      throw new Error('The backup contains an invalid transcript entry.');
+    }
+    if (seen.has(entry.filename)) throw new Error('The backup contains duplicate transcript filenames.');
+    const transcriptServerMarker = new RegExp(`^Server: .*\\(${guild.id}\\)$`, 'm');
+    if (!transcriptServerMarker.test(entry.content)) {
+      throw new Error('The backup contains a transcript that does not belong to this Discord server.');
+    }
+    seen.add(entry.filename);
+    transcriptBytes += Buffer.byteLength(entry.content, 'utf8');
+    if (transcriptBytes > MAX_BACKUP_UNCOMPRESSED_BYTES) throw new Error('The transcript data is too large to restore.');
+    safeTranscripts.push({ filename: entry.filename, content: entry.content });
+  }
+
+  await fs.mkdir(TRANSCRIPTS_DIR, { recursive: true });
+  const stagedFiles = [];
+  try {
+    for (const entry of safeTranscripts) {
+      const destination = path.join(TRANSCRIPTS_DIR, entry.filename);
+      const temporary = `${destination}.restore-${crypto.randomUUID()}.tmp`;
+      await fs.writeFile(temporary, entry.content, { mode: 0o600, flag: 'wx' });
+      stagedFiles.push({ temporary, destination });
+    }
+    const oldGuildData = database.guilds[guild.id] ? cloneJson(database.guilds[guild.id]) : null;
+    database.guilds[guild.id] = importedGuildData;
+    try {
+      await persistDatabase();
+      for (const file of stagedFiles) await fs.rename(file.temporary, file.destination);
+    } catch (error) {
+      if (oldGuildData) database.guilds[guild.id] = oldGuildData;
+      else delete database.guilds[guild.id];
+      await persistDatabase().catch(() => {});
+      throw error;
+    }
+    return {
+      transcriptCount: safeTranscripts.length,
+      missingTranscripts: Array.isArray(backup.data.missingTranscriptFiles) ? backup.data.missingTranscriptFiles.length : 0,
+    };
+  } finally {
+    await Promise.all(stagedFiles.map(file => fs.unlink(file.temporary).catch(() => {})));
+  }
 }
 
 function clip(value, max = 1000) {
@@ -309,6 +472,8 @@ function cleanPanelInput(input, previous = {}) {
   if (!['primary', 'secondary', 'success', 'danger'].includes(buttonStyleValue)) throw new Error('Invalid button style.');
   const channelId = input.channelId ?? previous.channelId ?? '';
   if (channelId && !validSnowflake(channelId)) throw new Error('The channel ID is invalid.');
+  const categoryId = String(input.categoryId ?? previous.categoryId ?? '');
+  if (categoryId && !validSnowflake(categoryId)) throw new Error('The ticket category ID is invalid.');
   return {
     id: previous.id || crypto.randomUUID(),
     name: clip(input.name ?? previous.name ?? 'New panel', 80) || 'New panel',
@@ -322,6 +487,7 @@ function cleanPanelInput(input, previous = {}) {
     buttonEmoji: clip(input.buttonEmoji ?? previous.buttonEmoji ?? '', 64),
     buttonReply: clip(input.buttonReply ?? previous.buttonReply ?? 'Thanks! Your button was clicked.', 1000),
     channelId,
+    categoryId,
     messageId: previous.messageId || null,
     publishedAt: previous.publishedAt || null,
     createdAt: previous.createdAt || new Date().toISOString(),
@@ -379,6 +545,17 @@ function commandBuilderList() {
       .addSubcommand(s => s.setName('remove').setDescription('Remove a member from the current ticket.')
         .addUserOption(o => o.setName('user').setDescription('Member to remove').setRequired(true)))
       .addSubcommand(s => s.setName('transcript').setDescription('Create and attach a transcript of the current ticket.'))),
+    guildOnly(new SlashCommandBuilder().setName('ticketpanel').setDescription('Publish a ticket panel routed to a category.')
+      .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
+      .addStringOption(o => o.setName('name').setDescription('Name/title of the ticket panel').setMinLength(1).setMaxLength(80).setRequired(true))
+      .addChannelOption(o => o.setName('category').setDescription('Category where tickets from this panel will be created').addChannelTypes(ChannelType.GuildCategory).setRequired(true))),
+    guildOnly(new SlashCommandBuilder().setName('backup').setDescription('Create a downloadable backup of this server’s EclipseMC data.')
+      .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+      .addSubcommand(s => s.setName('create').setDescription('Create and attach a downloadable server backup.'))),
+    guildOnly(new SlashCommandBuilder().setName('back').setDescription('Restore this server from an EclipseMC backup file.')
+      .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+      .addSubcommand(s => s.setName('load').setDescription('Upload a backup file and restore this server’s bot data.')
+        .addAttachmentOption(o => o.setName('file').setDescription('Backup file generated with /backup create').setRequired(true)))),
   ];
 }
 
@@ -476,9 +653,12 @@ async function createTicket(guild, opener, panel) {
     permissionOverwrites: overwrites,
     reason: `Support ticket opened by ${opener.tag} (${opener.id})`,
   };
-  if (gData.settings.ticketCategoryId && guild.channels.cache.get(gData.settings.ticketCategoryId)?.type === ChannelType.GuildCategory) {
-    createOptions.parent = gData.settings.ticketCategoryId;
-  }
+  const panelCategory = panel?.categoryId ? guild.channels.cache.get(panel.categoryId) : null;
+  const defaultCategory = gData.settings.ticketCategoryId ? guild.channels.cache.get(gData.settings.ticketCategoryId) : null;
+  const ticketCategory = panelCategory?.type === ChannelType.GuildCategory
+    ? panelCategory
+    : defaultCategory?.type === ChannelType.GuildCategory ? defaultCategory : null;
+  if (ticketCategory) createOptions.parent = ticketCategory.id;
   const channel = await guild.channels.create(createOptions);
   const ticket = {
     id: crypto.randomUUID(),
@@ -514,7 +694,7 @@ async function createTicket(guild, opener, panel) {
   return { ticket, channel, created: true };
 }
 
-async function closeTicket(guild, channel, actorUser, reason = 'Closed by staff/member') {
+async function closeTicket(guild, channel, actorUser, reason = 'Closed by staff/member', { deleteChannel = false } = {}) {
   const gData = getGuildData(guild.id);
   const ticket = findTicket(guild.id, channel.id);
   if (!ticket) throw new Error('This channel is not an open ticket.');
@@ -525,18 +705,20 @@ async function closeTicket(guild, channel, actorUser, reason = 'Closed by staff/
   ticket.closedByTag = actorUser.tag;
   ticket.transcriptFile = transcript.filename;
   await persistDatabase();
-  const ownerOverwrite = channel.permissionOverwrites.cache.get(ticket.ownerId);
-  if (ownerOverwrite) {
-    await channel.permissionOverwrites.edit(ticket.ownerId, {
-      SendMessages: false,
-      AddReactions: false,
-    }, { reason: `Ticket closed by ${actorUser.tag}` }).catch(() => {});
+  if (!deleteChannel) {
+    const ownerOverwrite = channel.permissionOverwrites.cache.get(ticket.ownerId);
+    if (ownerOverwrite) {
+      await channel.permissionOverwrites.edit(ticket.ownerId, {
+        SendMessages: false,
+        AddReactions: false,
+      }, { reason: `Ticket closed by ${actorUser.tag}` }).catch(() => {});
+    }
+    await channel.setName(`closed-${channel.name}`.slice(0, 100)).catch(() => {});
+    await channel.send({
+      content: `🔒 Ticket closed by <@${actorUser.id}>. A transcript has been saved.`,
+      allowedMentions: { users: [actorUser.id] },
+    }).catch(() => {});
   }
-  await channel.setName(`closed-${channel.name}`.slice(0, 100)).catch(() => {});
-  await channel.send({
-    content: `🔒 Ticket closed by <@${actorUser.id}>. A transcript has been saved.`,
-    allowedMentions: { users: [actorUser.id] },
-  }).catch(() => {});
   const logChannelId = gData.settings.logChannelId;
   const logChannel = validSnowflake(logChannelId) ? guild.channels.cache.get(logChannelId) : null;
   if (logChannel?.isTextBased() && typeof logChannel.send === 'function') {
@@ -549,9 +731,31 @@ async function closeTicket(guild, channel, actorUser, reason = 'Closed by staff/
   await makeLog(guild, {
     action: 'Ticket Closed', targetId: ticket.ownerId, targetTag: ticket.ownerTag,
     moderatorId: actorUser.id, moderatorTag: actorUser.tag,
-    channelId: channel.id, reason, details: `Transcript: ${transcript.filename}`,
+    channelId: channel.id, reason, details: `Transcript: ${transcript.filename}${deleteChannel ? ' · Channel scheduled for deletion after staff close' : ''}`,
   });
-  return { ticket, transcript };
+  if (deleteChannel) {
+    try {
+      await channel.delete(`Ticket closed by staff ${actorUser.tag} (${actorUser.id})`);
+    } catch (error) {
+      if (error.code !== 10003) {
+        console.error(`Ticket ${channel.id} was closed but its channel could not be deleted:`, error.message);
+        const ownerOverwrite = channel.permissionOverwrites.cache.get(ticket.ownerId);
+        if (ownerOverwrite) {
+          await channel.permissionOverwrites.edit(ticket.ownerId, {
+            SendMessages: false,
+            AddReactions: false,
+          }, { reason: `Ticket closed by ${actorUser.tag}; automatic deletion failed` }).catch(() => {});
+        }
+        await channel.setName(`closed-${channel.name}`.slice(0, 100)).catch(() => {});
+        await channel.send({
+          content: `🔒 Ticket closed by <@${actorUser.id}>. Automatic channel deletion failed; a transcript was saved. Please ask an administrator to check the bot's Manage Channels permission.`,
+          allowedMentions: { users: [actorUser.id] },
+        }).catch(() => {});
+        throw new Error('The ticket was recorded as closed, but I could not delete the channel. Make sure the bot has Manage Channels permission.');
+      }
+    }
+  }
+  return { ticket, transcript, channelDeleted: deleteChannel };
 }
 
 async function assertCanModerate(interaction, targetMember) {
@@ -587,10 +791,13 @@ async function enforceCommandAccess(interaction) {
     lock: PermissionFlagsBits.ManageChannels,
     unlock: PermissionFlagsBits.ManageChannels,
     modlogs: PermissionFlagsBits.ModerateMembers,
+    ticketpanel: PermissionFlagsBits.ManageGuild,
+    backup: PermissionFlagsBits.Administrator,
+    back: PermissionFlagsBits.Administrator,
   };
   const requiredPermission = nativePermissions[commandName];
   if (requiredPermission && !interaction.memberPermissions?.has(requiredPermission)) {
-    throw new Error(`You need the Discord permission ${commandName === 'ban' ? 'Ban Members' : commandName === 'kick' ? 'Kick Members' : commandName === 'clear' ? 'Manage Messages' : ['slowmode', 'lock', 'unlock'].includes(commandName) ? 'Manage Channels' : 'Moderate Members'} to use /${commandName}.`);
+    throw new Error(`You need the Discord permission ${commandName === 'ban' ? 'Ban Members' : commandName === 'kick' ? 'Kick Members' : commandName === 'clear' ? 'Manage Messages' : commandName === 'ticketpanel' ? 'Manage Server' : ['backup', 'back'].includes(commandName) ? 'Administrator' : ['slowmode', 'lock', 'unlock'].includes(commandName) ? 'Manage Channels' : 'Moderate Members'} to use /${commandName}.`);
   }
   const rule = guildData.commandPermissions?.[commandName];
   const allowedRoleIds = Array.isArray(rule?.roleIds) ? rule.roleIds : [];
@@ -610,9 +817,77 @@ async function handleModerationCommand(interaction) {
   if (name === 'help') {
     return interaction.reply(ephemeral([
       '**Moderation**: `/ban`, `/kick`, `/timeout`, `/untimeout`, `/warn`, `/warnings`, `/clear`, `/slowmode`, `/lock`, `/unlock`, `/modlogs`',
-      '**Tickets**: `/ticket setup`, `/ticket close`, `/ticket add`, `/ticket remove`, `/ticket transcript`',
+      '**Tickets**: `/ticket setup`, `/ticket close`, `/ticket add`, `/ticket remove`, `/ticket transcript`, `/ticketpanel`',
+      '**Backups**: `/backup create` downloads this server’s saved bot data and transcripts; `/back load` restores a backup file. Administrator permission required.',
       'Use the web dashboard to configure log channels, ticket panels, support roles, welcome messages, and command access.',
     ].join('\n')));
+  }
+
+  if (name === 'backup') {
+    if (!interaction.memberPermissions?.has(PermissionFlagsBits.Administrator)) {
+      throw new Error('Only server Administrators can create or restore backups.');
+    }
+    if (options.getSubcommand() !== 'create') throw new Error('Use /backup create.');
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    try {
+      const backup = await buildGuildBackup(guild);
+      const raw = Buffer.from(JSON.stringify(backup), 'utf8');
+      const compressed = gzipSync(raw, { level: 9 });
+      if (compressed.length > MAX_BACKUP_FILE_BYTES) {
+        throw new Error('This server backup is larger than Discord’s supported 9 MiB upload limit. Reduce old transcript data and try again. No backup was sent.');
+      }
+      const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+      const filename = `eclipsemc-backup-${guild.id}-${stamp}.json.gz`;
+      return await interaction.editReply({
+        content: `Backup created for **${guild.name}**. Included ${backup.data.transcripts.length} transcript file(s) and all saved EclipseMC database records for this server. Keep this file private; upload it with /back load to restore.`,
+        files: [new AttachmentBuilder(compressed, { name: filename, description: 'Compressed EclipseMC server backup' })],
+        allowedMentions: { parse: [] },
+      });
+    } catch (error) {
+      return interaction.editReply({ content: `Backup creation failed: ${safeError(error)}`, allowedMentions: { parse: [] } });
+    }
+  }
+
+  if (name === 'back') {
+    if (!interaction.memberPermissions?.has(PermissionFlagsBits.Administrator)) {
+      throw new Error('Only server Administrators can create or restore backups.');
+    }
+    if (options.getSubcommand() !== 'load') throw new Error('Use /back load and attach a backup file.');
+    const attachment = options.getAttachment('file', true);
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    try {
+      const backup = await downloadBackupAttachment(attachment);
+      const result = await restoreGuildBackup(guild, backup);
+      const missingNote = result.missingTranscripts
+        ? ` ${result.missingTranscripts} transcript file(s) were already missing when the backup was created.`
+        : '';
+      return await interaction.editReply(`Backup restored for **${guild.name}**. Restored the saved bot data and ${result.transcriptCount} transcript file(s). Existing Discord channels and messages are not recreated by a data backup.${missingNote}`);
+    } catch (error) {
+      return interaction.editReply({ content: `Backup restore failed: ${safeError(error)}`, allowedMentions: { parse: [] } });
+    }
+  }
+
+  if (name === 'ticketpanel') {
+    if (!interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild) && !interaction.memberPermissions?.has(PermissionFlagsBits.Administrator)) {
+      throw new Error('You need Manage Server permission to create a ticket panel.');
+    }
+    const panelName = clip(options.getString('name', true), 80);
+    const category = options.getChannel('category', true);
+    if (!category || category.type !== ChannelType.GuildCategory || category.guildId !== guild.id) {
+      throw new Error('Choose a category from this server.');
+    }
+    const panel = cleanPanelInput({
+      name: panelName, panelType: 'ticket', title: panelName,
+      description: 'Press the button below to open a private support ticket.',
+      categoryId: category.id,
+      color: gData.settings.embedColor, footer: gData.settings.footerText,
+      buttonLabel: 'Create Ticket', buttonStyle: 'primary', channelId: interaction.channelId,
+    });
+    gData.panels.unshift(panel);
+    if (gData.panels.length > 500) gData.panels.length = 500;
+    await persistDatabase();
+    const message = await publishPanel(guild, panel);
+    return interaction.reply(ephemeral(`Ticket panel **${panel.name}** published in <#${message.channelId}>. New tickets from this panel will be created under <#${category.id}>.`));
   }
 
   if (name === 'ticket') {
@@ -641,8 +916,11 @@ async function handleModerationCommand(interaction) {
 
     if (sub === 'close') {
       if (!isOwner && !isStaff) throw new Error('Only the ticket owner or configured support staff can close this ticket.');
-      await closeTicket(guild, interaction.channel, user, `Closed using /ticket close by ${user.tag}`);
-      return interaction.reply(ephemeral('Ticket closed and transcript saved.'));
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+      await closeTicket(guild, interaction.channel, user, `Closed using /ticket close by ${user.tag}`, { deleteChannel: isStaff });
+      return interaction.editReply(isStaff
+        ? 'Ticket closed, transcript saved, and ticket channel deleted.'
+        : 'Ticket closed and transcript saved. The channel has been archived.');
     }
     if (sub === 'transcript') {
       if (!isOwner && !isStaff) throw new Error('Only the ticket owner or configured support staff can export this transcript.');
@@ -836,12 +1114,15 @@ client.on(Events.InteractionCreate, async (interaction) => {
       const ticket = findTicket(guild.id, interaction.channelId);
       if (!ticket) return interaction.reply(ephemeral('This is not an open ticket.'));
       const member = await guild.members.fetch(interaction.user.id);
-      if (ticket.ownerId !== interaction.user.id && !isTicketStaff(member, gData)) {
+      const isStaff = isTicketStaff(member, gData);
+      if (ticket.ownerId !== interaction.user.id && !isStaff) {
         return interaction.reply(ephemeral('Only the ticket owner or support staff can close this ticket.'));
       }
       await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-      await closeTicket(guild, interaction.channel, interaction.user, `Closed using ticket button by ${interaction.user.tag}`);
-      return interaction.editReply('Ticket closed and transcript saved.');
+      await closeTicket(guild, interaction.channel, interaction.user, `Closed using ticket button by ${interaction.user.tag}`, { deleteChannel: isStaff });
+      return interaction.editReply(isStaff
+        ? 'Ticket closed, transcript saved, and ticket channel deleted.'
+        : 'Ticket closed and transcript saved. The channel has been archived.');
     }
 
     if (kind === 'panel' && action === 'button') {
