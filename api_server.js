@@ -37,6 +37,7 @@ const DB_FILE = path.join(DATA_DIR, 'database.json');
 const TRANSCRIPTS_DIR = path.join(DATA_DIR, 'transcripts');
 const BACKUP_FORMAT = 'eclipsemc-server-backup';
 const BACKUP_VERSION = 1;
+const TICKET_HANDLER_ROLE_ID = '1558793811696558132';
 const MAX_BACKUP_FILE_BYTES = 9 * 1024 * 1024;
 const MAX_BACKUP_UNCOMPRESSED_BYTES = 48 * 1024 * 1024;
 const PORT = Number(process.env.PORT || 3000);
@@ -410,6 +411,35 @@ function makeEmbed(panel, guildData) {
     .setFooter({ text: clip(panel.footer || guildData.settings.footerText || 'Support', 2048) });
 }
 
+function makeTicketEmbed(ticket, guildData) {
+  return new EmbedBuilder()
+    .setColor(hexColor(guildData.settings.embedColor))
+    .setTitle('Support Ticket')
+    .setDescription('Your support ticket is open. Please describe what you need help with. Use the button below when you are finished.')
+    .addFields(
+      { name: 'Member', value: `<@${ticket.ownerId}>`, inline: true },
+      { name: 'Ticket Handler', value: `<@&${TICKET_HANDLER_ROLE_ID}>`, inline: true },
+      { name: 'Claimed By', value: ticket.claimedById ? `<@${ticket.claimedById}>` : 'Unclaimed', inline: false },
+    )
+    .setFooter({ text: 'EclipseMC Support' })
+    .setTimestamp(ticket.createdAt ? new Date(ticket.createdAt) : new Date());
+}
+
+function ticketControlRow(ticket) {
+  const claimLabel = ticket?.claimedById ? 'Claimed' : 'Claim';
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId('ticket:close')
+      .setLabel('Close')
+      .setStyle(ButtonStyle.Danger),
+    new ButtonBuilder()
+      .setCustomId('ticket:claim')
+      .setLabel(claimLabel)
+      .setStyle(ButtonStyle.Success)
+      .setDisabled(Boolean(ticket?.claimedById)),
+  );
+}
+
 function buttonStyle(style) {
   const styles = {
     primary: ButtonStyle.Primary,
@@ -545,9 +575,9 @@ function commandBuilderList() {
       .addSubcommand(s => s.setName('remove').setDescription('Remove a member from the current ticket.')
         .addUserOption(o => o.setName('user').setDescription('Member to remove').setRequired(true)))
       .addSubcommand(s => s.setName('transcript').setDescription('Create and attach a transcript of the current ticket.'))),
-    guildOnly(new SlashCommandBuilder().setName('ticketpanel').setDescription('Publish a ticket panel routed to a category.')
+    guildOnly(new SlashCommandBuilder().setName('ticketpanel').setDescription('Set the ticket category for an existing ticket panel.')
       .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
-      .addStringOption(o => o.setName('name').setDescription('Name/title of the ticket panel').setMinLength(1).setMaxLength(80).setRequired(true))
+      .addStringOption(o => o.setName('panel').setDescription('Choose an existing ticket panel').setRequired(true).setAutocomplete(true))
       .addChannelOption(o => o.setName('category').setDescription('Category where tickets from this panel will be created').addChannelTypes(ChannelType.GuildCategory).setRequired(true))),
     guildOnly(new SlashCommandBuilder().setName('backup').setDescription('Create a downloadable backup of this server’s EclipseMC data.')
       .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
@@ -619,6 +649,7 @@ function isTicketStaff(member, guildData) {
   if (!member) return false;
   if (member.permissions?.has(PermissionFlagsBits.Administrator) || member.permissions?.has(PermissionFlagsBits.ManageChannels)) return true;
   const staffRoleIds = [
+    TICKET_HANDLER_ROLE_ID,
     ...(guildData.settings.supportRoleIds || []),
     ...(guildData.settings.moderatorRoleIds || []),
   ];
@@ -640,7 +671,11 @@ async function createTicket(guild, opener, panel) {
     { id: opener.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory, PermissionFlagsBits.AttachFiles] },
     { id: botMember.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory, PermissionFlagsBits.ManageChannels, PermissionFlagsBits.AttachFiles] },
   ];
-  for (const roleId of gData.settings.supportRoleIds || []) {
+  const ticketStaffRoleIds = [...new Set([
+    TICKET_HANDLER_ROLE_ID,
+    ...(gData.settings.supportRoleIds || []),
+  ])];
+  for (const roleId of ticketStaffRoleIds) {
     if (guild.roles.cache.has(roleId)) {
       overwrites.push({ id: roleId, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] });
     }
@@ -673,19 +708,27 @@ async function createTicket(guild, opener, panel) {
     closedById: null,
     closedByTag: null,
     transcriptFile: null,
+    claimedById: null,
+    claimedByTag: null,
+    claimedAt: null,
+    messageId: null,
   };
   gData.tickets.unshift(ticket);
   if (gData.tickets.length > 1000) gData.tickets.length = 1000;
   await persistDatabase();
-  const closeRow = new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId('ticket:close').setLabel('Close Ticket').setStyle(ButtonStyle.Danger),
-  );
-  const staffMentions = (gData.settings.supportRoleIds || []).filter(id => guild.roles.cache.has(id)).map(id => `<@&${id}>`).join(' ');
-  await channel.send({
-    content: `${staffMentions} <@${opener.id}>\nYour support ticket is open. Please describe what you need help with. Use the button below when you are finished.`,
-    components: [closeRow],
-    allowedMentions: { users: [opener.id], roles: gData.settings.supportRoleIds || [] },
+  const staffRoleIdsToMention = [...new Set([
+    TICKET_HANDLER_ROLE_ID,
+    ...(gData.settings.supportRoleIds || []),
+  ])].filter(id => guild.roles.cache.has(id));
+  const staffMentions = staffRoleIdsToMention.map(id => `<@&${id}>`).join(' ');
+  const ticketMessage = await channel.send({
+    content: `${staffMentions} <@${opener.id}>`.trim(),
+    embeds: [makeTicketEmbed(ticket, gData)],
+    components: [ticketControlRow(ticket)],
+    allowedMentions: { users: [opener.id], roles: staffRoleIdsToMention },
   });
+  ticket.messageId = ticketMessage.id;
+  await persistDatabase();
   await makeLog(guild, {
     action: 'Ticket Opened', targetId: opener.id, targetTag: opener.tag,
     moderatorTag: 'Ticket System', moderatorId: client.user?.id || '',
@@ -869,25 +912,50 @@ async function handleModerationCommand(interaction) {
 
   if (name === 'ticketpanel') {
     if (!interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild) && !interaction.memberPermissions?.has(PermissionFlagsBits.Administrator)) {
-      throw new Error('You need Manage Server permission to create a ticket panel.');
+      throw new Error('You need Manage Server permission to configure a ticket panel.');
     }
-    const panelName = clip(options.getString('name', true), 80);
+    const panelSelector = clip(options.getString('panel', true), 100);
     const category = options.getChannel('category', true);
     if (!category || category.type !== ChannelType.GuildCategory || category.guildId !== guild.id) {
       throw new Error('Choose a category from this server.');
     }
+
+    let panelIndex = gData.panels.findIndex(item => item.id === panelSelector && item.panelType === 'ticket');
+    if (panelIndex < 0) {
+      const matchingPanels = gData.panels
+        .map((item, index) => ({ item, index }))
+        .filter(entry => entry.item.panelType === 'ticket' && entry.item.name.toLowerCase() === panelSelector.toLowerCase());
+      if (matchingPanels.length === 1) panelIndex = matchingPanels[0].index;
+      else if (matchingPanels.length > 1) throw new Error('Several ticket panels share that name. Select the exact panel from the autocomplete list.');
+    }
+    if (panelIndex < 0) {
+      throw new Error('That existing ticket panel was not found. Choose a panel from the autocomplete list, or create one from the dashboard first.');
+    }
+
+    const selectedPanel = gData.panels[panelIndex];
+    const oldDestination = selectedPanel.channelId ? guild.channels.cache.get(selectedPanel.channelId) : null;
+    const oldDestinationUsable = oldDestination
+      && oldDestination.isTextBased()
+      && typeof oldDestination.send === 'function';
     const panel = cleanPanelInput({
-      name: panelName, panelType: 'ticket', title: panelName,
-      description: 'Press the button below to open a private support ticket.',
       categoryId: category.id,
-      color: gData.settings.embedColor, footer: gData.settings.footerText,
-      buttonLabel: 'Create Ticket', buttonStyle: 'primary', channelId: interaction.channelId,
-    });
-    gData.panels.unshift(panel);
-    if (gData.panels.length > 500) gData.panels.length = 500;
+      channelId: oldDestinationUsable ? oldDestination.id : interaction.channelId,
+    }, selectedPanel);
+    if (!oldDestinationUsable) panel.messageId = null;
+    gData.panels[panelIndex] = panel;
     await persistDatabase();
-    const message = await publishPanel(guild, panel);
-    return interaction.reply(ephemeral(`Ticket panel **${panel.name}** published in <#${message.channelId}>. New tickets from this panel will be created under <#${category.id}>.`));
+
+    let publishedMessage = null;
+    let publishWarning = '';
+    try {
+      publishedMessage = await publishPanel(guild, panel);
+    } catch (error) {
+      // Routing is already saved; if the old panel message cannot be edited,
+      // tickets opened with its button still use this updated categoryId.
+      publishWarning = ` The category was saved, but I couldn't refresh the panel message: ${safeError(error)}.`;
+    }
+    const location = publishedMessage ? ` The panel message is available in <#${publishedMessage.channelId}>.` : '';
+    return interaction.reply(ephemeral(`Updated existing ticket panel **${panel.name}**. New tickets opened from this panel will be created in <#${category.id}>.${location}${publishWarning}`));
   }
 
   if (name === 'ticket') {
@@ -1080,6 +1148,27 @@ client.on(Events.MessageUpdate, async (oldMessage, newMessage) => {
 
 client.on(Events.InteractionCreate, async (interaction) => {
   try {
+    if (interaction.isAutocomplete()) {
+      if (interaction.commandName !== 'ticketpanel' || !interaction.guildId) {
+        return interaction.respond([]).catch(() => {});
+      }
+      const focused = interaction.options.getFocused(true);
+      if (focused.name !== 'panel') return interaction.respond([]).catch(() => {});
+      const query = String(focused.value || '').trim().toLocaleLowerCase();
+      const choices = getGuildData(interaction.guildId).panels
+        .filter(panel => panel.panelType === 'ticket')
+        .filter(panel => !query
+          || String(panel.name || '').toLocaleLowerCase().includes(query)
+          || String(panel.title || '').toLocaleLowerCase().includes(query)
+          || String(panel.id || '').toLocaleLowerCase().includes(query))
+        .slice(0, 25)
+        .map(panel => ({
+          name: clip(`${panel.name || 'Ticket panel'} · ${String(panel.id || '').slice(0, 8)}`, 100),
+          value: String(panel.id),
+        }));
+      return interaction.respond(choices).catch(() => {});
+    }
+
     if (interaction.isChatInputCommand()) {
       if (!interaction.inGuild()) return interaction.reply(ephemeral('Use this command inside a server.'));
       try {
@@ -1108,6 +1197,38 @@ client.on(Events.InteractionCreate, async (interaction) => {
       await interaction.deferReply({ flags: MessageFlags.Ephemeral });
       const result = await createTicket(guild, interaction.user, panel);
       return interaction.editReply(result.created ? `Your ticket is ready: ${result.channel}` : `You already have an open ticket: ${result.channel}`);
+    }
+
+    if (kind === 'ticket' && action === 'claim') {
+      const ticket = findTicket(guild.id, interaction.channelId);
+      if (!ticket) return interaction.reply(ephemeral('This is not an open ticket.'));
+      const member = await guild.members.fetch(interaction.user.id);
+      if (!isTicketStaff(member, gData)) {
+        return interaction.reply(ephemeral('Only configured ticket staff or members with the Ticket Handler role can claim this ticket.'));
+      }
+      if (ticket.claimedById) {
+        const currentClaim = ticket.claimedById === interaction.user.id
+          ? 'You have already claimed this ticket.'
+          : `This ticket has already been claimed by <@${ticket.claimedById}>.`;
+        return interaction.reply({ ...ephemeral(currentClaim), allowedMentions: { users: [ticket.claimedById] } });
+      }
+      ticket.claimedById = interaction.user.id;
+      ticket.claimedByTag = interaction.user.tag;
+      ticket.claimedAt = new Date().toISOString();
+      await persistDatabase();
+      const updatedEmbed = makeTicketEmbed(ticket, gData);
+      await interaction.message.edit({
+        content: interaction.message.content || '',
+        embeds: [updatedEmbed],
+        components: [ticketControlRow(ticket)],
+        allowedMentions: { parse: [] },
+      });
+      await makeLog(guild, {
+        action: 'Ticket Claimed', targetId: ticket.ownerId, targetTag: ticket.ownerTag,
+        moderatorId: interaction.user.id, moderatorTag: interaction.user.tag,
+        channelId: interaction.channelId, details: `Claimed ticket ${interaction.channel}.`,
+      });
+      return interaction.reply(ephemeral(`You claimed ${interaction.channel}.`));
     }
 
     if (kind === 'ticket' && action === 'close') {
