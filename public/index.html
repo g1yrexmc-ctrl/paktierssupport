@@ -1,101 +1,485 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>EclipseMC Dashboard</title>
-<style>
-:root{--bg:#120f1d;--s1:#1b1730;--s2:#251f40;--bd:#352d5a;--tx:#efeaff;--mu:#9b92c4;--gold:#e8b64c;--vi:#7c5cff;--ok:#43d391;--bad:#ff5d7a}
-*{box-sizing:border-box}html,body{margin:0}body{background:var(--bg);color:var(--tx);font:14px/1.5 'Avenir Next','Segoe UI',system-ui,sans-serif}
-button,input,select,textarea{font:inherit;color:inherit}
-input,select,textarea{width:100%;background:var(--s2);border:1px solid var(--bd);border-radius:8px;padding:9px 11px;outline:0}
-input:focus,select:focus,textarea:focus,button:focus-visible{border-color:var(--gold);box-shadow:0 0 0 2px #e8b64c44}
-select[multiple]{height:110px}textarea{min-height:80px;resize:vertical}label{display:block;color:var(--mu);margin:12px 0 4px;font-size:13px}
-.btn{background:var(--s2);border:1px solid var(--bd);border-radius:8px;padding:8px 14px;cursor:pointer}.btn:hover{border-color:var(--gold)}
-.pri{background:var(--gold);color:#241a05;border-color:var(--gold);font-weight:700}.dng{color:var(--bad)}
-#app{display:grid;grid-template-columns:230px 1fr;min-height:100vh}
-nav{background:var(--s1);border-right:1px solid var(--bd);padding:18px 12px;position:sticky;top:0;height:100vh}
-.brand{display:flex;align-items:center;gap:10px;font-weight:800;font-size:17px;padding:4px 8px 18px}.brand img{width:34px;height:34px;border-radius:9px}
-nav a{display:block;padding:10px 12px;border-radius:8px;color:var(--mu);cursor:pointer;margin-bottom:2px}nav a.on{background:var(--s2);color:var(--gold);font-weight:700}
-main{padding:26px;max-width:1100px;width:100%}h1{margin:0 0 4px;font-size:24px}.sub{color:var(--mu);margin:0 0 22px}
-.card{background:var(--s1);border:1px solid var(--bd);border-radius:12px;padding:16px;margin-bottom:14px}
-.grid{display:grid;gap:14px;grid-template-columns:repeat(auto-fit,minmax(200px,1fr))}.two{display:grid;gap:18px;grid-template-columns:1fr 1fr}
-.stat b{display:block;font-size:34px;color:var(--gold);line-height:1.1}.row{display:flex;align-items:center;gap:12px;justify-content:space-between;flex-wrap:wrap}
-.tag{padding:2px 9px;border-radius:99px;font-size:12px;background:var(--s2)}.open{color:var(--ok)}.closed{color:var(--mu)}
-table{width:100%;border-collapse:collapse}td,th{padding:9px 8px;border-bottom:1px solid var(--bd);text-align:left;vertical-align:top}th{color:var(--mu);font-weight:600}
-.wrap{overflow-x:auto}.prev{border-left:4px solid var(--vi);background:#2b2b31;border-radius:6px;padding:12px;color:#ddd}.prev h4{margin:0 0 6px;color:#fff;font-size:15px}.prev .b{display:inline-block;margin-top:10px;padding:6px 14px;border-radius:5px;color:#fff;font-weight:600}
-.modal{position:fixed;inset:0;background:#000b;display:flex;align-items:center;justify-content:center;padding:14px;z-index:5}.modal>div{background:var(--s1);border:1px solid var(--bd);border-radius:12px;width:min(720px,100%);max-height:86vh;overflow:auto;padding:18px}
-.msg{padding:6px 0;border-bottom:1px solid var(--bd)}.msg small{color:var(--mu)}
-#toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:var(--s2);border:1px solid var(--gold);padding:10px 18px;border-radius:99px;display:none;z-index:9}#toast.bad{border-color:var(--bad)}
-#login{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:16px}#login .card{width:min(380px,100%);padding:26px}
-@media(max-width:800px){#app{grid-template-columns:1fr}nav{position:static;height:auto;display:flex;overflow-x:auto;gap:4px;padding:10px;border-right:0;border-bottom:1px solid var(--bd)}.brand{padding:0 10px 0 4px}nav a{white-space:nowrap;margin:0}.two{grid-template-columns:1fr}main{padding:16px}}
-</style></head><body>
-<div id="login" hidden><div class="card"><div class="brand"><img src="/logo.png" alt="" onerror="this.style.display='none'">EclipseMC</div>
-<label>Dashboard password</label><input id="pw" type="password" autocomplete="current-password" onkeydown="event.key==='Enter'&&login()">
-<button class="btn pri" style="width:100%;margin-top:16px" onclick="login()">Sign in</button></div></div>
-<div id="app" hidden><nav id="nav"></nav><main id="main"></main></div><div id="toast"></div>
-<script>
-const $=s=>document.querySelector(s);let T=localStorage.getItem('t'),S={v:'overview',edit:null},D={};
-const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-function toast(m,bad){const t=$('#toast');t.textContent=m;t.className=bad?'bad':'';t.style.display='block';clearTimeout(toast.h);toast.h=setTimeout(()=>t.style.display='none',2800)}
-async function api(p,m='GET',b){const r=await fetch('/api/'+p,{method:m,headers:{'content-type':'application/json',authorization:'Bearer '+T},body:b?JSON.stringify(b):undefined});
- const j=await r.json().catch(()=>({}));if(r.status===401&&p!=='login'){logout();throw 0}if(!r.ok){toast(j.error||'Request failed',1);throw 0}return j}
-async function login(){try{const j=await api('login','POST',{password:$('#pw').value});T=j.token;localStorage.setItem('t',T);boot()}catch{}}
-function logout(){localStorage.removeItem('t');T=null;$('#app').hidden=true;$('#login').hidden=false}
-const NAV=[['overview','Overview'],['commands','Commands & permissions'],['panels','Ticket panels'],['tickets','Ticket logs'],['cases','Mod logs'],['settings','Settings']];
-async function boot(){if(!T)return logout();try{
- [D.meta,D.cmds,D.cfg,D.panels,D.tickets,D.cases]=await Promise.all(['meta','commands','config','panels','tickets','cases'].map(x=>api(x)))}catch{return}
- $('#login').hidden=true;$('#app').hidden=false;render()}
-function render(){$('#nav').innerHTML=`<div class="brand"><img src="/logo.png" alt="" onerror="this.style.display='none'">EclipseMC</div>`+NAV.map(([k,l])=>`<a class="${S.v===k?'on':''}" onclick="go('${k}')">${l}</a>`).join('')+`<a onclick="logout()">Sign out</a>`;
- $('#main').innerHTML=V[S.v]()}
-function go(v){S.v=v;S.edit=null;render()}
-const opts=(l,sel,blank)=>(blank?`<option value="">${blank}</option>`:'')+l.map(x=>`<option value="${x.id}" ${[].concat(sel).includes(x.id)?'selected':''}>${esc(x.name)}</option>`).join('');
-const txt=()=>D.meta.channels.filter(c=>c.type!==4),cats=()=>D.meta.channels.filter(c=>c.type===4);
-const date=t=>t?new Date(t).toLocaleString():'-',val=id=>$('#'+id)?.value,multi=id=>[...$('#'+id).selectedOptions].map(o=>o.value);
-const head=(t,s)=>`<h1>${t}</h1><p class="sub">${s}</p>`;
-const V={
-overview:()=>{const s=D.meta.stats;return head('Overview',D.meta.ready?`Connected to ${esc(D.meta.guild.name)} - ${D.meta.ping}ms latency`:'The bot is not in your server yet. Check GUILD_ID and invite the bot.')+
- `<div class="grid">${[['Members',D.meta.guild?.members??0],['Open tickets',s?.open??0],['Total tickets',s?.total??0],['Mod cases',s?.cases??0],['Panels',s?.panels??0]].map(([l,n])=>`<div class="card stat"><b>${n}</b>${l}</div>`).join('')}</div>
- <div class="card"><b>Quick start</b><p class="sub" style="margin:6px 0 0">Set your log channels in Settings, build a panel under Ticket panels, then send it to a channel.</p></div>`},
-commands:()=>head('Commands & permissions','Turn commands off or restrict them to specific roles. Administrators can always use enabled commands. Empty roles = default Discord permission.')+
- D.cmds.map(c=>`<div class="card"><div class="row"><div><b>/${c.n}</b> ${c.mod?'<span class="tag">moderation</span>':''}<div class="sub" style="margin:0">${esc(c.d)}</div></div>
- <label style="margin:0;display:flex;gap:8px;align-items:center;color:var(--tx)"><input type="checkbox" style="width:auto" id="e_${c.n}" ${D.cfg.disabled.includes(c.n)?'':'checked'} onchange="saveCmd('${c.n}')">Enabled</label></div>
- <label>Allowed roles (hold to select several)</label><select multiple id="r_${c.n}" onchange="saveCmd('${c.n}')">${opts(D.meta.roles,D.cfg.perms[c.n]||[])}</select></div>`).join(''),
-panels:()=>{if(S.edit)return editor();return head('Ticket panels','Design the message members click to open a ticket.')+`<button class="btn pri" onclick="newPanel()">Create panel</button><div style="height:14px"></div>`+
- (D.panels.map(p=>`<div class="card"><div class="row"><div><b>${esc(p.name||p.title)}</b><div class="sub" style="margin:0">${p.messageId?'Live in <#'+p.channelId+'>':'Not sent yet'}</div></div>
- <div class="row"><button class="btn" onclick="editPanel('${p.id}')">Edit</button><button class="btn dng" onclick="delPanel('${p.id}')">Remove</button></div></div>
- <div class="row" style="margin-top:12px"><select id="send_${p.id}" style="flex:1">${opts(txt(),p.channelId||'','Choose channel')}</select><button class="btn" onclick="sendPanel('${p.id}')">${p.messageId?'Resend':'Send'} panel</button></div></div>`).join('')||'<div class="card sub">No panels yet. Create your first one.</div>')},
-tickets:()=>head('Ticket logs','Latest 300 tickets with saved transcripts.')+`<div class="card wrap"><table><tr><th>#</th><th>User</th><th>Panel</th><th>Status</th><th>Opened</th><th></th></tr>`+
- D.tickets.map(t=>`<tr><td>${t.id}</td><td>${esc(t.userTag)}${t.claimedBy?'<br><small class="sub">claimed</small>':''}</td><td>${esc(t.panelName)}</td><td class="${t.status}">${t.status}</td><td>${date(t.createdAt)}</td>
- <td><button class="btn" onclick="viewT(${t.id})">Transcript</button> ${t.status==='open'?`<button class="btn dng" onclick="closeT(${t.id})">Close</button>`:''}</td></tr>`).join('')+`</table></div>`,
-cases:()=>head('Mod logs','Every ban, kick, timeout, warning and purge.')+`<div class="card wrap"><table><tr><th>Case</th><th>Type</th><th>User</th><th>Moderator</th><th>Reason</th><th>Date</th></tr>`+
- D.cases.map(c=>`<tr><td>#${c.id}</td><td><span class="tag">${c.type}</span></td><td>${esc(c.userTag)}</td><td>${esc(c.modTag)}</td><td>${esc(c.reason)}</td><td>${date(c.at)}</td></tr>`).join('')+`</table></div>`,
-settings:()=>head('Settings','Log channels and staff roles.')+`<div class="card"><label>Moderation log channel</label><select id="s_log">${opts(txt(),D.cfg.logChannel,'None')}</select>
- <label>Default ticket log channel (used when a panel has none)</label><select id="s_tlog">${opts(txt(),D.cfg.ticketLogChannel,'None')}</select>
- <label>Moderator roles (can use all moderation commands)</label><select multiple id="s_mod">${opts(D.meta.roles,D.cfg.modRoles)}</select>
- <label style="display:flex;gap:8px;align-items:center;color:var(--tx)"><input type="checkbox" style="width:auto" id="s_dm" ${D.cfg.dmOnAction?'checked':''}>DM members when they are punished</label>
- <button class="btn pri" style="margin-top:16px" onclick="saveSettings()">Save settings</button></div>`};
-async function putCfg(){D.cfg=await api('config','PUT',D.cfg)}
-async function saveCmd(n){const off=!$('#e_'+n).checked;D.cfg.disabled=D.cfg.disabled.filter(x=>x!==n);if(off)D.cfg.disabled.push(n);D.cfg.perms[n]=multi('r_'+n);await putCfg();toast('Saved /'+n)}
-async function saveSettings(){Object.assign(D.cfg,{logChannel:val('s_log'),ticketLogChannel:val('s_tlog'),modRoles:multi('s_mod'),dmOnAction:$('#s_dm').checked});await putCfg();toast('Settings saved')}
-const PF=['name','title','description','color','buttonLabel','buttonEmoji','buttonStyle','categoryId','logChannel','welcome','prefix','image','footer','maxOpen'];
-const newPanel=()=>{S.edit={color:'#7c5cff',buttonLabel:'Open ticket',buttonStyle:'Primary',prefix:'ticket',maxOpen:1,roles:[],title:'EclipseMC Support',description:'Need help? Click the button below to open a ticket.',welcome:'Hello {user}, staff will be with you shortly.'};render()};
-const editPanel=id=>{S.edit={...D.panels.find(p=>p.id===id)};render()};
-function editor(){const p=S.edit;const f=(k,l,t='text')=>`<label>${l}</label><input id="p_${k}" type="${t}" value="${esc(p[k])}" oninput="prev()">`;
- return head(p.id?'Edit panel':'New panel','Changes to live panels update the posted message when you save.')+`<div class="two"><div class="card">${f('name','Panel name (dashboard only)')}${f('title','Embed title')}
- <label>Embed description</label><textarea id="p_description" oninput="prev()">${esc(p.description)}</textarea>${f('color','Embed color','color')}${f('image','Image URL (optional)')}${f('footer','Footer text (optional)')}
- ${f('buttonLabel','Button label')}${f('buttonEmoji','Button emoji (optional)')}<label>Button color</label><select id="p_buttonStyle" onchange="prev()">${['Primary','Secondary','Success','Danger'].map(s=>`<option ${p.buttonStyle===s?'selected':''}>${s}</option>`).join('')}</select>
- </div><div><div class="card"><label style="margin-top:0">Preview</label><div class="prev" id="pv"></div></div><div class="card"><label style="margin-top:0">Ticket behavior</label>
- <label>Category for new tickets</label><select id="p_categoryId">${opts(cats(),p.categoryId,'No category')}</select><label>Support roles (can see and manage tickets)</label><select multiple id="p_roles">${opts(D.meta.roles,p.roles||[])}</select>
- <label>Log channel for this panel</label><select id="p_logChannel">${opts(txt(),p.logChannel,'Use default')}</select>${f('prefix','Channel name prefix')}${f('maxOpen','Max open tickets per user','number')}
- <label>Welcome message ({user} and {panel} available)</label><textarea id="p_welcome">${esc(p.welcome)}</textarea></div></div></div>
- <div class="row" style="justify-content:flex-start"><button class="btn pri" onclick="savePanel()">Save panel</button><button class="btn" onclick="go('panels')">Cancel</button></div><script>prev()<\/script>`}
-function prev(){const g=k=>val('p_'+k)??'';const e=$('#pv');if(!e)return;const c={Primary:'#5865f2',Secondary:'#4e5058',Success:'#248046',Danger:'#da373c'}[g('buttonStyle')];
- e.style.borderLeftColor=g('color');e.innerHTML=`<h4>${esc(g('title'))}</h4><div>${esc(g('description')).replace(/\n/g,'<br>')}</div>${g('image')?`<img src="${esc(g('image'))}" style="max-width:100%;border-radius:6px;margin-top:8px">`:''}<span class="b" style="background:${c}">${esc(g('buttonEmoji'))} ${esc(g('buttonLabel'))}</span>${g('footer')?`<div style="font-size:12px;margin-top:8px;color:#aaa">${esc(g('footer'))}</div>`:''}`}
-setInterval(()=>{if(S.edit&&$('#pv')&&!$('#pv').innerHTML)prev()},300);
-async function savePanel(){const b={};PF.forEach(k=>b[k]=val('p_'+k));b.roles=multi('p_roles');const id=S.edit.id;
- try{await api(id?'panels/'+id:'panels',id?'PUT':'POST',b);D.panels=await api('panels');toast('Panel saved');go('panels')}catch{}}
-async function sendPanel(id){const c=val('send_'+id);if(!c)return toast('Choose a channel first',1);try{await api(`panels/${id}/send`,'POST',{channelId:c});D.panels=await api('panels');toast('Panel sent');render()}catch{}}
-async function delPanel(id){if(!confirm('Remove this panel and delete its message?'))return;await api('panels/'+id,'DELETE');D.panels=await api('panels');toast('Panel removed');render()}
-async function viewT(id){try{const m=await api(`tickets/${id}/transcript`);const d=document.createElement('div');d.className='modal';d.onclick=e=>{if(e.target===d)d.remove()};
- d.innerHTML=`<div><div class="row"><b>Ticket #${id} transcript</b><button class="btn" onclick="this.closest('.modal').remove()">Close</button></div>`+(m.map(x=>`<div class="msg"><b>${esc(x.a)}</b> <small>${date(x.at)}</small><div>${esc(x.c)}${x.e?' <small>[embed]</small>':''}</div>${x.f.map(u=>`<a href="${esc(u)}" target="_blank" rel="noopener" style="color:var(--gold)">attachment</a>`).join(' ')}</div>`).join('')||'<p class="sub">Empty.</p>')+`</div>`;document.body.appendChild(d)}catch{}}
-async function closeT(id){if(!confirm('Close ticket #'+id+'?'))return;await api(`tickets/${id}/close`,'POST');toast('Closing ticket...');setTimeout(async()=>{D.tickets=await api('tickets');render()},2500)}
-boot();
-</script></body></html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#090a10">
+  <title>EclipseMC · Discord Dashboard</title>
+  <style>
+    :root{color-scheme:dark;--bg:#090a10;--surface:#11131d;--surface2:#171a27;--surface3:#202437;--border:#292d42;--text:#f5f6ff;--muted:#989db9;--accent:#9c7bff;--accent2:#6d63ff;--good:#5de0ad;--warn:#ffce78;--bad:#ff7d96;--radius:16px;--shadow:0 18px 60px rgba(0,0,0,.28)}
+    *{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;background:radial-gradient(ellipse at 20% -20%,rgba(105,88,255,.17),transparent 38%),var(--bg);color:var(--text);font:14px/1.5 Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;min-height:100vh}button,input,select,textarea{font:inherit}button{cursor:pointer}button:disabled{opacity:.55;cursor:not-allowed}a{color:#c8bbff;text-decoration:none}a:hover{color:#fff}.muted{color:var(--muted)}.eyebrow{text-transform:uppercase;letter-spacing:.14em;font-size:10px;font-weight:800;color:var(--muted)}.small{font-size:12px}.hidden{display:none!important}
+    .login-screen{min-height:100vh;display:grid;place-items:center;padding:22px}.login-card{width:min(440px,100%);padding:36px;border:1px solid var(--border);border-radius:24px;background:linear-gradient(145deg,rgba(25,28,44,.96),rgba(15,17,27,.98));box-shadow:var(--shadow)}.brand-mark{width:48px;height:48px;border:1px solid #51418e;border-radius:15px;background:linear-gradient(145deg,#b09aff,#5c4ce2);display:grid;place-items:center;font-size:24px;font-weight:900;color:#fff;overflow:hidden}.brand-mark img{height:100%;width:100%;object-fit:cover}.login-card h1{font-size:27px;letter-spacing:-.045em;margin:23px 0 8px}.login-card p{color:var(--muted);margin:0 0 25px}.login-card label{display:block;color:#dce0f8;font-size:12px;font-weight:700;margin:14px 0 7px}.login-card input{width:100%}.login-foot{margin-top:20px;color:#727894;font-size:11px;text-align:center}
+    .app-shell{min-height:100vh;display:grid;grid-template-columns:250px minmax(0,1fr)}.sidebar{height:100vh;position:sticky;top:0;border-right:1px solid var(--border);background:rgba(12,13,21,.92);backdrop-filter:blur(20px);padding:23px 14px;display:flex;flex-direction:column;gap:26px;z-index:5}.brand{display:flex;align-items:center;gap:12px;padding:0 10px}.brand .brand-mark{width:38px;height:38px;border-radius:12px;font-size:18px}.brand-name{font-weight:800;letter-spacing:-.035em;font-size:15px}.brand-caption{font-size:10px;color:var(--muted);letter-spacing:.08em}.nav-group{display:grid;gap:5px}.nav-heading{padding:0 12px;margin-bottom:6px}.nav-btn{border:1px solid transparent;background:transparent;color:#aeb3ce;display:flex;align-items:center;gap:12px;border-radius:11px;padding:11px 12px;text-align:left;transition:.18s;width:100%}.nav-btn:hover{background:#171927;color:#fff}.nav-btn.active{color:#fff;background:linear-gradient(90deg,rgba(141,112,255,.22),rgba(141,112,255,.08));border-color:rgba(159,130,255,.23)}.nav-icon{width:21px;text-align:center;font-size:16px}.sidebar-bottom{margin-top:auto}.server-chip{border:1px solid var(--border);background:var(--surface);border-radius:13px;padding:12px;margin:0 4px 15px;overflow:hidden}.server-chip .status-dot{display:inline-block;width:7px;height:7px;border-radius:100%;background:var(--good);margin-right:7px;box-shadow:0 0 10px rgba(93,224,173,.55)}.server-name{font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:7px}.server-meta{color:var(--muted);font-size:11px;margin-top:2px}.sidebar-footer{padding:0 8px;display:flex;align-items:center;justify-content:space-between;color:var(--muted);font-size:11px}
+    .main{min-width:0}.topbar{height:76px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;gap:18px;padding:0 34px;background:rgba(9,10,16,.45);backdrop-filter:blur(20px);position:sticky;top:0;z-index:4}.top-title{font-size:17px;font-weight:750;letter-spacing:-.03em}.top-subtitle{color:var(--muted);font-size:11px;margin-top:1px}.top-actions{display:flex;align-items:center;gap:12px}.select-wrap{position:relative}.select-wrap select{min-width:190px;max-width:260px}.status-pill{padding:7px 10px;border-radius:999px;border:1px solid rgba(93,224,173,.2);background:rgba(93,224,173,.08);color:var(--good);font-size:11px;font-weight:750;white-space:nowrap}.content{padding:31px 34px 50px;max-width:1580px;margin:auto}.page-head{display:flex;align-items:flex-end;justify-content:space-between;gap:15px;margin-bottom:23px}.page-head h1{margin:4px 0 4px;font-size:27px;letter-spacing:-.055em;line-height:1.2}.page-head p{margin:0;color:var(--muted);max-width:680px}.head-actions{display:flex;gap:8px;flex-wrap:wrap}.grid{display:grid;gap:16px}.stats-grid{grid-template-columns:repeat(4,minmax(0,1fr));margin-bottom:18px}.two-grid{grid-template-columns:minmax(0,1.25fr) minmax(280px,.75fr)}.card{border:1px solid var(--border);background:linear-gradient(155deg,rgba(20,22,34,.96),rgba(15,16,26,.96));border-radius:var(--radius);padding:20px;min-width:0;box-shadow:0 7px 25px rgba(0,0,0,.08)}.card-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:17px}.card-title{font-weight:750;font-size:13px;letter-spacing:-.01em}.card-subtitle{font-size:11px;color:var(--muted);margin-top:3px}.stat-card{position:relative;overflow:hidden;min-height:123px}.stat-card:after{content:"";width:92px;height:92px;position:absolute;right:-26px;top:-28px;border-radius:50%;background:rgba(156,123,255,.1);filter:blur(1px)}.stat-top{display:flex;align-items:center;justify-content:space-between;color:var(--muted);font-size:12px}.stat-icon{width:30px;height:30px;border-radius:10px;display:grid;place-items:center;background:#25213c;color:#c8b8ff}.stat-value{font-size:29px;font-weight:800;letter-spacing:-.06em;margin-top:12px;line-height:1.15}.stat-note{font-size:11px;color:var(--muted);margin-top:7px}.btn{display:inline-flex;align-items:center;justify-content:center;gap:7px;padding:9px 13px;border-radius:10px;border:1px solid var(--border);background:var(--surface2);color:#e9eaff;font-weight:700;font-size:12px;transition:transform .16s,border-color .16s,background .16s;white-space:nowrap}.btn:hover{background:#24283c;border-color:#4a4e6c;transform:translateY(-1px)}.btn.primary{background:linear-gradient(135deg,#9475ff,#6658e9);border-color:#8a72fc;color:white;box-shadow:0 7px 22px rgba(107,85,230,.18)}.btn.primary:hover{background:linear-gradient(135deg,#a58cff,#7467ff)}.btn.danger{color:#ffb0bf;border-color:rgba(255,125,150,.23);background:rgba(255,125,150,.07)}.btn.ghost{background:transparent}.btn.small-btn{padding:6px 9px;font-size:11px;border-radius:8px}.input,select,textarea{background:#0d0f18;border:1px solid #30344b;border-radius:10px;color:var(--text);width:100%;padding:10px 11px;outline:none;transition:border-color .15s,box-shadow .15s;min-width:0}.input:focus,select:focus,textarea:focus{border-color:#8a72fc;box-shadow:0 0 0 3px rgba(138,114,252,.12)}textarea{resize:vertical;min-height:96px}select[multiple]{min-height:110px;padding:7px}option{padding:6px}.field-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:15px}.field{display:grid;gap:7px;min-width:0}.field.full{grid-column:1/-1}.field label{font-size:12px;color:#d1d4e8;font-weight:700}.field .hint{font-size:11px;color:var(--muted);margin-top:-3px}.field-actions{display:flex;justify-content:flex-end;gap:9px;margin-top:20px}.divider{height:1px;background:var(--border);margin:20px 0}.badge{display:inline-flex;align-items:center;gap:5px;border:1px solid var(--border);background:#1b1e2d;border-radius:99px;padding:4px 8px;font-size:10px;font-weight:750;color:#bfc3dc;white-space:nowrap}.badge.good{color:var(--good);border-color:rgba(93,224,173,.18);background:rgba(93,224,173,.06)}.badge.warn{color:var(--warn);border-color:rgba(255,206,120,.18);background:rgba(255,206,120,.06)}.badge.bad{color:var(--bad);border-color:rgba(255,125,150,.18);background:rgba(255,125,150,.06)}.table-wrap{overflow-x:auto;width:100%}table{border-collapse:collapse;width:100%;min-width:600px;text-align:left}th{font-size:10px;color:#8289a8;font-weight:800;text-transform:uppercase;letter-spacing:.09em;padding:10px 12px;border-bottom:1px solid var(--border);white-space:nowrap}td{padding:13px 12px;border-bottom:1px solid rgba(41,45,66,.72);font-size:12px;color:#e0e2f1;vertical-align:top}tr:last-child td{border-bottom:0}tbody tr:hover{background:rgba(255,255,255,.015)}.primary-cell{font-weight:700}.sub-cell{font-size:10px;color:var(--muted);margin-top:3px;overflow-wrap:anywhere}.empty{padding:34px 16px;text-align:center;color:var(--muted)}.empty-icon{font-size:24px;margin-bottom:9px;opacity:.8}.list-stack{display:grid;gap:10px}.activity-row{display:flex;gap:11px;align-items:flex-start;padding:10px 0;border-bottom:1px solid rgba(41,45,66,.65)}.activity-row:last-child{border-bottom:0}.activity-icon{height:30px;width:30px;border-radius:10px;background:#22213b;color:#c4b1ff;display:grid;place-items:center;flex:0 0 auto}.activity-main{min-width:0;flex:1}.activity-title{font-weight:700;font-size:12px}.activity-detail{font-size:11px;color:var(--muted);margin-top:2px;overflow-wrap:anywhere}.activity-time{font-size:10px;color:#777e9d;white-space:nowrap}.progress-line{height:5px;background:#272a3e;border-radius:99px;overflow:hidden;margin-top:12px}.progress-line span{display:block;height:100%;border-radius:99px;background:linear-gradient(90deg,#7b68f2,#b49bff);width:50%}
+    .panel-layout{display:grid;grid-template-columns:250px minmax(0,1fr);gap:16px;align-items:start}.panel-sidebar{padding:12px}.panel-sidebar-head{display:flex;align-items:center;justify-content:space-between;padding:6px 5px 13px;font-size:12px;font-weight:800}.panel-list{display:grid;gap:7px}.panel-item{width:100%;text-align:left;padding:11px;border:1px solid transparent;border-radius:11px;background:transparent;color:#c8cbe0;display:block}.panel-item:hover{background:#1b1d2c}.panel-item.active{background:rgba(156,123,255,.12);border-color:rgba(156,123,255,.28);color:white}.panel-item-name{font-weight:750;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.panel-item-meta{font-size:10px;color:var(--muted);margin-top:4px}.panel-editor{display:grid;grid-template-columns:minmax(0,1.08fr) minmax(255px,.72fr);gap:16px}.preview-wrap{position:sticky;top:100px}.discord-preview{background:#313338;border-radius:13px;padding:17px;color:#dbdee1}.discord-channel{display:flex;align-items:center;gap:7px;font-size:11px;color:#949ba4;margin-bottom:17px}.discord-bubble{display:flex;gap:10px;align-items:flex-start}.discord-avatar{width:32px;height:32px;border-radius:50%;display:grid;place-items:center;background:linear-gradient(140deg,#a88aff,#5c50d9);font-weight:900;color:white;flex:0 0 auto}.discord-author{font-weight:700;font-size:12px;color:#f2f3f5}.discord-date{font-size:9px;color:#999fa8;margin-left:5px;font-weight:400}.discord-embed{margin-top:8px;border-left:4px solid #7c5cfc;background:#2b2d31;border-radius:4px;padding:12px 12px 11px;max-width:100%;overflow-wrap:anywhere}.discord-embed h3{font-size:13px;margin:0 0 7px;color:#f2f3f5}.discord-embed p{font-size:11px;color:#dbdee1;margin:0;white-space:pre-wrap}.discord-footer{font-size:9px;color:#9ba1aa;margin-top:13px}.discord-action{margin-top:10px;background:#5865f2;color:#fff;border:0;border-radius:5px;padding:7px 11px;font-size:10px;font-weight:700}.preview-note{color:var(--muted);font-size:10px;margin-top:12px;line-height:1.6}.color-line{display:flex;gap:10px;align-items:center}.color-line input[type=color]{height:39px;width:46px;padding:4px;border-radius:9px;background:#0d0f18;border:1px solid #30344b}.color-line input[type=text]{flex:1}.command-row{display:grid;grid-template-columns:minmax(130px,.7fr) minmax(180px,1.3fr) 85px 80px;gap:13px;align-items:center;padding:13px 0;border-bottom:1px solid var(--border)}.command-row:last-child{border-bottom:0}.command-name{font-weight:800;color:#e9e8ff}.command-desc{font-size:10px;color:var(--muted);margin-top:3px}.toggle{position:relative;display:inline-flex;align-items:center;gap:8px;color:#b4b9d2;font-size:11px}.toggle input{appearance:none;width:34px;height:20px;border-radius:99px;background:#33374e;border:1px solid #454962;position:relative;cursor:pointer;margin:0;flex:0 0 auto}.toggle input:checked{background:#7e65ec;border-color:#9a84ff}.toggle input:after{content:"";height:14px;width:14px;border-radius:50%;background:#fff;position:absolute;left:2px;top:2px;transition:left .15s}.toggle input:checked:after{left:16px}.toast-wrap{position:fixed;right:22px;bottom:22px;display:grid;gap:9px;z-index:20;max-width:min(390px,calc(100vw - 44px))}.toast{background:#1b2030;border:1px solid #353b55;box-shadow:var(--shadow);border-radius:12px;padding:13px 16px;color:#f1f1ff;font-size:12px;animation:slidein .2s ease}.toast.error{border-color:rgba(255,125,150,.4)}.toast.success{border-color:rgba(93,224,173,.4)}@keyframes slidein{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}.loading-bar{height:2px;position:fixed;z-index:30;top:0;left:0;background:linear-gradient(90deg,#6754df,#d1b9ff);animation:loading 1.2s infinite ease-in-out;transform-origin:left;width:35%}@keyframes loading{0%{transform:translateX(-110%)}100%{transform:translateX(400%)}}.footer-note{font-size:10px;color:#737995;margin-top:20px;text-align:center}.inline-code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;background:#23263a;border:1px solid #333851;padding:2px 5px;border-radius:5px;font-size:11px}.banner{display:flex;gap:10px;align-items:flex-start;padding:12px 14px;border:1px solid rgba(255,206,120,.18);background:rgba(255,206,120,.045);border-radius:12px;color:#d9c79f;font-size:11px;margin-bottom:17px}.banner strong{color:#ffe1a2}.server-empty{padding:38px 24px;text-align:center}.server-empty h2{font-size:20px;margin-bottom:8px}.server-empty p{max-width:530px;margin:0 auto 18px;color:var(--muted)}
+    @media(max-width:1180px){.stats-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.panel-editor{grid-template-columns:minmax(0,1fr)}.preview-wrap{position:static}.two-grid{grid-template-columns:minmax(0,1fr)}}
+    @media(max-width:850px){.app-shell{grid-template-columns:74px minmax(0,1fr)}.sidebar{padding:17px 9px}.brand{justify-content:center;padding:0}.brand-word,.nav-heading,.nav-label,.server-chip .server-name,.server-chip .server-meta,.sidebar-footer .footer-label{display:none}.nav-btn{justify-content:center;padding:12px 8px}.nav-icon{font-size:18px}.server-chip{text-align:center;padding:10px 5px;margin:0 0 14px}.server-chip .status-dot{margin:0}.topbar{padding:0 18px}.content{padding:24px 18px 40px}.top-subtitle{display:none}.select-wrap select{min-width:120px;max-width:170px}.panel-layout{grid-template-columns:1fr}.panel-sidebar{padding:10px}.panel-list{grid-template-columns:repeat(2,minmax(0,1fr))}.panel-sidebar-head{padding-bottom:9px}}
+    @media(max-width:560px){.app-shell{display:block}.sidebar{position:fixed;top:auto;bottom:0;left:0;right:0;width:100%;height:auto;padding:7px 8px calc(7px + env(safe-area-inset-bottom));border-right:0;border-top:1px solid var(--border);display:block;background:rgba(12,13,21,.96)}.sidebar>.brand,.sidebar>.sidebar-bottom{display:none}.sidebar .nav-group{display:flex;justify-content:space-around;gap:2px}.sidebar .nav-heading{display:none}.nav-btn{display:grid;gap:2px;justify-items:center;padding:7px 2px;border-radius:8px;flex:1;font-size:9px}.nav-icon{font-size:16px;width:auto}.nav-label{display:block;font-size:9px;white-space:nowrap}.topbar{height:65px;padding:0 14px}.top-title{font-size:15px}.status-pill{display:none}.content{padding:21px 13px 95px}.page-head{align-items:flex-start;flex-direction:column}.page-head h1{font-size:24px}.stats-grid{gap:10px}.stat-card{padding:15px;min-height:110px}.stat-value{font-size:25px}.card{padding:15px}.field-grid{grid-template-columns:1fr}.field.full{grid-column:auto}.panel-list{grid-template-columns:1fr 1fr}.command-row{grid-template-columns:1fr 70px;gap:8px}.command-row .command-role-field{grid-column:1/-1;grid-row:2}.command-row .command-save{grid-column:2;grid-row:1}.command-row .toggle{grid-column:1;grid-row:1}.command-command{grid-column:1/-1}.select-wrap select{min-width:0;width:145px}.server-empty{padding:30px 10px}}
+  </style>
+</head>
+<body>
+  <div id="loadingBar" class="loading-bar hidden"></div>
+  <section id="loginScreen" class="login-screen">
+    <div class="login-card">
+      <div class="brand-mark" id="loginLogo"><span>E</span></div>
+      <div class="eyebrow" style="margin-top:20px">ECLIPSEMC / SECURE ACCESS</div>
+      <h1>Welcome back.</h1>
+      <p>Sign in to manage your Discord moderation, tickets, logs and custom panels.</p>
+      <form id="loginForm">
+        <label for="dashboardPassword">Dashboard password</label>
+        <input class="input" id="dashboardPassword" type="password" autocomplete="current-password" placeholder="Enter your dashboard password" required>
+        <div id="loginError" class="small" style="color:var(--bad);margin-top:10px;display:none"></div>
+        <button class="btn primary" style="width:100%;margin-top:17px;padding:12px" type="submit">Unlock dashboard <span>↗</span></button>
+      </form>
+      <div class="login-foot">Your access is protected by a server-side session.</div>
+    </div>
+  </section>
+
+  <div id="appShell" class="app-shell hidden">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-mark" id="sideLogo"><span>E</span></div>
+        <div class="brand-word"><div class="brand-name">ECLIPSEMC</div><div class="brand-caption">DISCORD OPERATIONS</div></div>
+      </div>
+      <div>
+        <div class="nav-heading eyebrow">Workspace</div>
+        <nav class="nav-group" aria-label="Dashboard sections">
+          <button class="nav-btn active" data-nav="overview"><span class="nav-icon">◈</span><span class="nav-label">Overview</span></button>
+          <button class="nav-btn" data-nav="logs"><span class="nav-icon">☷</span><span class="nav-label">Moderation Logs</span></button>
+          <button class="nav-btn" data-nav="tickets"><span class="nav-icon">▣</span><span class="nav-label">Ticket Center</span></button>
+          <button class="nav-btn" data-nav="panels"><span class="nav-icon">▤</span><span class="nav-label">Panel Maker</span></button>
+        </nav>
+      </div>
+      <div>
+        <div class="nav-heading eyebrow">Configuration</div>
+        <nav class="nav-group" aria-label="Configuration sections">
+          <button class="nav-btn" data-nav="settings"><span class="nav-icon">⚙</span><span class="nav-label">Server Settings</span></button>
+          <button class="nav-btn" data-nav="permissions"><span class="nav-icon">♙</span><span class="nav-label">Permission Setter</span></button>
+          <button class="nav-btn" data-nav="commands"><span class="nav-icon">⌘</span><span class="nav-label">Command Guide</span></button>
+        </nav>
+      </div>
+      <div class="sidebar-bottom">
+        <div class="server-chip"><span class="status-dot"></span><div class="server-name" id="sideServerName">No server selected</div><div class="server-meta" id="sideServerMeta">Choose a server above</div></div>
+        <div class="sidebar-footer"><span class="footer-label">ECLIPSEMC · V1.0</span><button class="btn ghost small-btn" id="logoutButton">Log out ↗</button></div>
+      </div>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <div><div class="top-title" id="topTitle">Overview</div><div class="top-subtitle" id="topSubtitle">Your server, at a glance.</div></div>
+        <div class="top-actions">
+          <div class="select-wrap"><select id="guildSelect" aria-label="Choose Discord server"></select></div>
+          <span class="status-pill" id="botStatus"><span style="margin-right:5px">●</span>Bot Online</span>
+        </div>
+      </header>
+      <div class="content">
+        <div id="noGuilds" class="card server-empty hidden"><div class="brand-mark" style="margin:0 auto 15px">E</div><h2>Your bot has not joined a server</h2><p>Invite the bot with the <span class="inline-code">bot</span> and <span class="inline-code">applications.commands</span> OAuth scopes, then refresh this page.</p><button class="btn" id="refreshEmpty">Refresh server list</button></div>
+
+        <section data-view="overview">
+          <div class="page-head"><div><div class="eyebrow">WORKSPACE / OVERVIEW</div><h1>Server overview</h1><p>Your moderation, support queue and automation status in one place.</p></div><div class="head-actions"><button class="btn" id="refreshOverview">↻ Refresh</button><button class="btn primary" data-goto="panels">＋ Build a panel</button></div></div>
+          <div class="grid stats-grid">
+            <article class="card stat-card"><div class="stat-top"><span>Members</span><span class="stat-icon">♙</span></div><div class="stat-value" id="statMembers">—</div><div class="stat-note">In the selected server</div></article>
+            <article class="card stat-card"><div class="stat-top"><span>Open tickets</span><span class="stat-icon">▣</span></div><div class="stat-value" id="statTickets">—</div><div class="stat-note" id="ticketStatNote">Your active support queue</div></article>
+            <article class="card stat-card"><div class="stat-top"><span>Audit entries</span><span class="stat-icon">☷</span></div><div class="stat-value" id="statLogs">—</div><div class="stat-note">Recent saved activity</div></article>
+            <article class="card stat-card"><div class="stat-top"><span>Panels</span><span class="stat-icon">▤</span></div><div class="stat-value" id="statPanels">—</div><div class="stat-note">Saved message designs</div></article>
+          </div>
+          <div class="grid two-grid">
+            <article class="card"><div class="card-head"><div><div class="card-title">Recent activity</div><div class="card-subtitle">Latest moderation and server events</div></div><button class="btn small-btn" data-goto="logs">View all →</button></div><div id="overviewActivity" class="list-stack"></div></article>
+            <article class="card"><div class="card-head"><div><div class="card-title">Control center</div><div class="card-subtitle">Quick links for your server</div></div><span class="badge good">● Ready</span></div><div class="list-stack">
+              <div class="activity-row"><div class="activity-icon">▣</div><div class="activity-main"><div class="activity-title">Ticket operations</div><div class="activity-detail">Review open tickets and saved transcripts.</div><div style="margin-top:8px"><button class="btn small-btn" data-goto="tickets">Open ticket center →</button></div></div></div>
+              <div class="activity-row"><div class="activity-icon">▤</div><div class="activity-main"><div class="activity-title">Custom panels</div><div class="activity-detail">Design a ticket launcher or a custom embed button.</div><div style="margin-top:8px"><button class="btn small-btn" data-goto="panels">Open panel maker →</button></div></div></div>
+              <div class="activity-row"><div class="activity-icon">♙</div><div class="activity-main"><div class="activity-title">Access control</div><div class="activity-detail">Restrict commands to selected Discord roles.</div><div style="margin-top:8px"><button class="btn small-btn" data-goto="permissions">Set permissions →</button></div></div></div>
+            </div></article>
+          </div>
+        </section>
+
+        <section data-view="logs" class="hidden">
+          <div class="page-head"><div><div class="eyebrow">MODERATION / AUDIT TRAIL</div><h1>Moderation logs</h1><p>Saved actions and supported Discord message/member events.</p></div><div class="head-actions"><button class="btn" id="refreshLogs">↻ Refresh</button></div></div>
+          <div class="card"><div class="card-head"><div><div class="card-title">Audit history</div><div class="card-subtitle">Up to 150 latest entries are shown here.</div></div><input id="logSearch" class="input" style="max-width:260px" placeholder="Search action, user, reason…"></div><div class="table-wrap"><table><thead><tr><th>Action</th><th>Target</th><th>Moderator / source</th><th>Reason / details</th><th>When</th></tr></thead><tbody id="logsTable"></tbody></table></div><div id="logsEmpty" class="empty hidden"><div class="empty-icon">☷</div>No audit entries match this search.</div></div>
+        </section>
+
+        <section data-view="tickets" class="hidden">
+          <div class="page-head"><div><div class="eyebrow">SUPPORT / TICKET CENTER</div><h1>Ticket operations</h1><p>Follow open support conversations and retrieve closed ticket transcripts.</p></div><div class="head-actions"><button class="btn" id="refreshTickets">↻ Refresh</button><button class="btn primary" data-goto="panels">＋ Ticket panel</button></div></div>
+          <div class="banner"><span>ⓘ</span><div><strong>Ticket access is enforced in Discord.</strong> Configure Support Roles and a Ticket Category in Server Settings. The bot needs Manage Channels, View Channels and Send Messages to create private tickets.</div></div>
+          <div class="card"><div class="card-head"><div><div class="card-title">Ticket queue</div><div class="card-subtitle">Open tickets are listed first.</div></div><select id="ticketFilter" style="max-width:160px"><option value="all">All tickets</option><option value="open">Open only</option><option value="closed">Closed only</option></select></div><div class="table-wrap"><table><thead><tr><th>Status</th><th>Ticket channel</th><th>Opened by</th><th>Created / closed</th><th>Transcript</th></tr></thead><tbody id="ticketsTable"></tbody></table></div><div id="ticketsEmpty" class="empty hidden"><div class="empty-icon">▣</div>No tickets yet. Publish a ticket panel to let members open one.</div></div>
+        </section>
+
+        <section data-view="panels" class="hidden">
+          <div class="page-head"><div><div class="eyebrow">CUSTOMIZATION / MESSAGE STUDIO</div><h1>Panel maker</h1><p>Design ticket launchers and custom embed buttons, preview the look, then publish or update them in Discord.</p></div><div class="head-actions"><button class="btn" id="newPanelButton">＋ New panel</button><button class="btn primary" id="publishPanelTop">↗ Publish panel</button></div></div>
+          <div class="panel-layout">
+            <aside class="card panel-sidebar"><div class="panel-sidebar-head"><span>Saved panels</span><span class="badge" id="panelCount">0</span></div><div id="panelList" class="panel-list"></div><div class="footer-note">Remove a panel to also delete its posted Discord message, when accessible.</div></aside>
+            <div class="panel-editor">
+              <article class="card"><div class="card-head"><div><div class="card-title">Panel configuration</div><div class="card-subtitle">Changes are saved to the persistent data volume.</div></div><span class="badge" id="panelSaveState">Unsaved</span></div>
+                <form id="panelForm" class="field-grid">
+                  <div class="field"><label for="panelName">Internal name</label><input class="input" id="panelName" data-panel-field="name" maxlength="80" placeholder="Support launcher" required></div>
+                  <div class="field"><label for="panelType">Panel type</label><select id="panelType" data-panel-field="panelType"><option value="ticket">Ticket creator</option><option value="custom">Custom embed button</option></select></div>
+                  <div class="field full"><label for="panelTitle">Embed title</label><input class="input" id="panelTitle" data-panel-field="title" maxlength="256" placeholder="Need help?"></div>
+                  <div class="field full"><label for="panelDescription">Embed description</label><textarea id="panelDescription" data-panel-field="description" maxlength="4000" placeholder="Explain what happens when someone presses the button."></textarea><span class="hint">Discord embed description: up to 4,000 characters.</span></div>
+                  <div class="field"><label for="panelColor">Accent color</label><div class="color-line"><input id="panelColorPicker" type="color" value="#7c5cfc" aria-label="Choose panel color"><input class="input" id="panelColor" data-panel-field="color" value="#7C5CFC" maxlength="7"></div></div>
+                  <div class="field"><label for="panelFooter">Footer</label><input class="input" id="panelFooter" data-panel-field="footer" maxlength="200" placeholder="Your support team"></div>
+                  <div class="field"><label for="panelButtonLabel">Button label</label><input class="input" id="panelButtonLabel" data-panel-field="buttonLabel" maxlength="80" placeholder="Create Ticket"></div>
+                  <div class="field"><label for="panelButtonStyle">Button style</label><select id="panelButtonStyle" data-panel-field="buttonStyle"><option value="primary">Primary · blurple</option><option value="secondary">Secondary · grey</option><option value="success">Success · green</option><option value="danger">Danger · red</option></select></div>
+                  <div class="field"><label for="panelButtonEmoji">Button emoji (optional)</label><input class="input" id="panelButtonEmoji" data-panel-field="buttonEmoji" maxlength="64" placeholder="🎫"></div>
+                  <div class="field" id="buttonReplyField"><label for="panelButtonReply">Custom button response</label><input class="input" id="panelButtonReply" data-panel-field="buttonReply" maxlength="1000" placeholder="Thanks for clicking!"><span class="hint">For custom panels, this reply is only visible to the clicker.</span></div>
+                  <div class="field full"><label for="panelChannel">Publish destination</label><select id="panelChannel" data-panel-field="channelId" required></select><span class="hint">The bot must be able to view and send messages in this channel.</span></div>
+                  <div class="field-actions field full" style="justify-content:space-between"><button class="btn danger" id="deletePanelButton" type="button">Remove panel</button><div style="display:flex;gap:8px"><button class="btn" id="savePanelButton" type="submit">Save design</button><button class="btn primary" id="publishPanelButton" type="button">Publish / update ↗</button></div></div>
+                </form>
+              </article>
+              <aside class="card preview-wrap"><div class="card-head"><div><div class="card-title">Live preview</div><div class="card-subtitle">Approximate Discord embed appearance</div></div><span class="badge">PREVIEW</span></div><div class="discord-preview"><div class="discord-channel"><span>⌗</span><span>support</span><span style="margin-left:auto">Today</span></div><div class="discord-bubble"><div class="discord-avatar">E</div><div style="min-width:0;flex:1"><div class="discord-author">EclipseMC Support <span class="discord-date">Today at 12:00 PM</span></div><div class="discord-embed" id="previewEmbed"><h3 id="previewTitle">Need help?</h3><p id="previewDescription">Click the button below to open a private support ticket.</p><div class="discord-footer" id="previewFooter">Your support team</div></div><button class="discord-action" id="previewButton" type="button">🎫 Create Ticket</button></div></div></div><div id="previewNote" class="preview-note">Ticket panels create private channels and notify the configured support roles.</div></aside>
+            </div>
+          </div>
+        </section>
+
+        <section data-view="settings" class="hidden">
+          <div class="page-head"><div><div class="eyebrow">CONFIGURATION / SERVER PROFILE</div><h1>Server settings</h1><p>Choose where audit logs go, where tickets live, and how welcome messages look.</p></div><div class="head-actions"><button class="btn" id="refreshSettings">↻ Reload</button></div></div>
+          <div class="grid two-grid">
+            <article class="card"><div class="card-head"><div><div class="card-title">Channel routing</div><div class="card-subtitle">All channels must be accessible to the bot.</div></div><span class="badge">SERVER</span></div><form id="settingsForm"><div class="field-grid">
+              <div class="field full"><label for="settingLogChannel">Moderation log channel</label><select id="settingLogChannel"></select><span class="hint">Bot moderation actions, tickets, and supported member/message events are saved here.</span></div>
+              <div class="field full"><label for="settingTicketCategory">Ticket category</label><select id="settingTicketCategory"></select><span class="hint">New private ticket channels are created under this category when possible.</span></div>
+              <div class="field full"><label for="settingWelcomeChannel">Welcome channel</label><select id="settingWelcomeChannel"></select></div>
+              <div class="field full"><label for="settingWelcomeMessage">Welcome message</label><textarea id="settingWelcomeMessage" maxlength="1800" placeholder="Welcome {user} to {server}!" style="min-height:90px"></textarea><span class="hint">Supported placeholders: <span class="inline-code">{user}</span> and <span class="inline-code">{server}</span>.</span></div>
+              <div class="field"><label for="settingEmbedColor">Default embed color</label><div class="color-line"><input type="color" id="settingColorPicker" value="#7c5cfc" aria-label="Choose default embed color"><input class="input" id="settingEmbedColor" maxlength="7"></div></div>
+              <div class="field"><label for="settingFooter">Default embed footer</label><input class="input" id="settingFooter" maxlength="200"></div>
+            </div><div class="field-actions"><button class="btn primary" type="submit">Save server settings</button></div></form></article>
+            <div class="grid" style="align-content:start;gap:16px">
+              <article class="card"><div class="card-head"><div><div class="card-title">Support roles</div><div class="card-subtitle">Can view new tickets and close tickets.</div></div></div><div class="field"><label for="settingSupportRoles">Select support roles</label><select multiple id="settingSupportRoles"></select><span class="hint">Use Ctrl / Cmd to select multiple roles.</span></div><div class="field-actions"><button class="btn primary" id="saveSupportRoles" type="button">Save support roles</button></div></article>
+              <article class="card"><div class="card-head"><div><div class="card-title">Moderator roles</div><div class="card-subtitle">Extra roles recognized as ticket staff.</div></div></div><div class="field"><label for="settingModeratorRoles">Select moderator roles</label><select multiple id="settingModeratorRoles"></select></div><div class="field-actions"><button class="btn primary" id="saveModeratorRoles" type="button">Save moderator roles</button></div></article>
+              <article class="card"><div class="card-title">Storage status</div><div class="card-subtitle">The database and transcripts are written under the configured data directory.</div><div class="divider"></div><div class="activity-row"><div class="activity-icon">◈</div><div class="activity-main"><div class="activity-title">Railway volume</div><div class="activity-detail">Attach a volume to the same service, mounted at <span class="inline-code">/data</span>, and set <span class="inline-code">DATA_DIR=/data</span>.</div></div></div><div class="activity-row"><div class="activity-icon">✓</div><div class="activity-main"><div class="activity-title">Persistent records</div><div class="activity-detail">Guild settings, panel designs, ticket history, warnings and moderation logs are stored in a JSON database.</div></div></div></article>
+            </div>
+          </div>
+        </section>
+
+        <section data-view="permissions" class="hidden">
+          <div class="page-head"><div><div class="eyebrow">SECURITY / COMMAND ACCESS</div><h1>Permission setter</h1><p>Disable a command or choose which server roles may use it. Native Discord permissions and bot role hierarchy still apply.</p></div><div class="head-actions"><button class="btn" id="refreshPermissions">↻ Reload</button></div></div>
+          <div class="banner"><span>ⓘ</span><div><strong>Permission layers stack.</strong> A command needs its required Discord permission, the bot's required permissions, and any role allowlist you configure here. Server Administrators bypass role allowlists. A command switched off here stays disabled.</div></div>
+          <div class="card"><div class="card-head"><div><div class="card-title">Command access rules</div><div class="card-subtitle">Save each row after changing it.</div></div><span class="badge" id="permissionCommandCount">0 commands</span></div><div id="commandPermissionList"></div></div>
+        </section>
+
+        <section data-view="commands" class="hidden">
+          <div class="page-head"><div><div class="eyebrow">REFERENCE / BOT COMMANDS</div><h1>Command guide</h1><p>Moderation and ticket tools available to members and server staff.</p></div><div class="head-actions"><button class="btn" data-goto="permissions">Configure access →</button></div></div>
+          <div class="grid two-grid">
+            <article class="card"><div class="card-head"><div><div class="card-title">Moderation commands</div><div class="card-subtitle">Slash commands appear in Discord's command menu.</div></div></div><div id="moderationCommandGuide" class="list-stack"></div></article>
+            <article class="card"><div class="card-head"><div><div class="card-title">Ticket commands</div><div class="card-subtitle">Ticket members still require the channel's Discord permissions.</div></div></div><div id="ticketCommandGuide" class="list-stack"></div><div class="divider"></div><div class="card-title">Quick setup</div><div class="activity-detail" style="margin-top:8px">1. Select a log channel in Server Settings.<br>2. Choose support roles and a ticket category.<br>3. Publish a ticket panel in Panel Maker.<br>4. Invite the bot with the required permissions and keep its role above members it moderates.</div></article>
+          </div>
+          <div class="footer-note">No command uses eval or executes arbitrary JavaScript. Keep your bot token and dashboard password private.</div>
+        </section>
+      </div>
+    </main>
+  </div>
+  <div id="toastWrap" class="toast-wrap" aria-live="polite"></div>
+
+  <script>
+    const $ = (selector, root = document) => root.querySelector(selector);
+    const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
+    const state = { me: null, guildId: '', data: null, view: 'overview', selectedPanelId: null, panelDraft: null, loading: false };
+    const VIEW_META = {
+      overview: ['Overview', 'Your server, at a glance.'], logs: ['Moderation Logs', 'Moderation history and server audit events.'],
+      tickets: ['Ticket Center', 'Private support channels and transcripts.'], panels: ['Panel Maker', 'Design and publish Discord panels.'],
+      settings: ['Server Settings', 'Configure routing, roles and welcome messages.'], permissions: ['Permission Setter', 'Manage per-command role allowlists.'],
+      commands: ['Command Guide', 'Moderation and ticket command reference.'],
+    };
+    const MOD_COMMANDS = [
+      ['/ban target reason', 'Ban a member, with an optional audit reason.', 'Ban Members'],
+      ['/kick target reason', 'Remove a member from the server.', 'Kick Members'],
+      ['/timeout target minutes reason', 'Timeout a member for 1–40,320 minutes.', 'Moderate Members'],
+      ['/untimeout target reason', 'Remove an existing timeout.', 'Moderate Members'],
+      ['/warn target reason', 'Store a warning and try to notify the member by DM.', 'Moderate Members'],
+      ['/warnings target', 'Review up to ten latest warnings for a member.', 'Moderate Members'],
+      ['/clear amount', 'Bulk delete 1–100 recent messages; Discord skips messages older than 14 days.', 'Manage Messages'],
+      ['/slowmode seconds', 'Set channel slowmode from 0 to 21,600 seconds.', 'Manage Channels'],
+      ['/lock channel', 'Deny Send Messages for @everyone in a text channel.', 'Manage Channels'],
+      ['/unlock channel', 'Clear the @everyone Send Messages override.', 'Manage Channels'],
+      ['/modlogs target', 'Review recent audit entries, optionally filtered by target.', 'Moderate Members'],
+      ['/help', 'Show a compact command group reference.', 'Everyone'],
+    ];
+    const TICKET_COMMANDS = [
+      ['/ticket setup', 'Publish a basic ticket panel in the current text channel.', 'Manage Server'],
+      ['/ticket close', 'Close the current ticket and save a transcript.', 'Ticket owner / staff'],
+      ['/ticket add user', 'Grant a member access to the current ticket.', 'Support staff'],
+      ['/ticket remove user', 'Remove a non-owner member from the current ticket.', 'Support staff'],
+      ['/ticket transcript', 'Export up to the latest 100 messages of this ticket.', 'Ticket owner / staff'],
+    ];
+
+    function esc(value) { return String(value ?? '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch])); }
+    function fmtNumber(value) { return new Intl.NumberFormat().format(Number(value || 0)); }
+    function fmtDate(value) { if (!value) return '—'; const date = new Date(value); return Number.isNaN(date.getTime()) ? '—' : date.toLocaleString([], {month:'short', day:'numeric', year:'numeric', hour:'2-digit', minute:'2-digit'}); }
+    function relativeDate(value) { if (!value) return '—'; const d = new Date(value); if (Number.isNaN(d.getTime())) return '—'; const mins = Math.max(0, Math.floor((Date.now()-d.getTime())/60000)); if (mins < 1) return 'just now'; if (mins < 60) return `${mins}m ago`; if (mins < 1440) return `${Math.floor(mins/60)}h ago`; return `${Math.floor(mins/1440)}d ago`; }
+    function toast(message, type = 'success') { const node = document.createElement('div'); node.className = `toast ${type}`; node.textContent = message; $('#toastWrap').appendChild(node); setTimeout(() => node.remove(), 4200); }
+    function setLoading(on) { state.loading = on; $('#loadingBar').classList.toggle('hidden', !on); }
+    async function api(url, options = {}) {
+      const response = await fetch(url, { credentials: 'same-origin', ...options, headers: { ...(options.body ? {'Content-Type':'application/json'} : {}), ...(options.headers || {}) } });
+      let body = {};
+      try { body = await response.json(); } catch { body = {}; }
+      if (!response.ok) {
+        if (response.status === 401 && !url.startsWith('/api/login')) showLogin();
+        throw new Error(body.error || `Request failed (${response.status})`);
+      }
+      return body;
+    }
+    function showLogin() { $('#appShell').classList.add('hidden'); $('#loginScreen').classList.remove('hidden'); }
+    function showApp() { $('#loginScreen').classList.add('hidden'); $('#appShell').classList.remove('hidden'); }
+    function logoFallback(img) { img.addEventListener('error', () => { const mark = img.parentElement; img.remove(); if (mark && !mark.querySelector('span')) mark.innerHTML = '<span>E</span>'; }); }
+    const sideLogo = new Image(); sideLogo.src = '/logo.png'; sideLogo.alt = 'Logo'; sideLogo.style.cssText = 'width:100%;height:100%;object-fit:cover'; logoFallback(sideLogo); $('#sideLogo').appendChild(sideLogo);
+    const loginLogo = new Image(); loginLogo.src = '/logo.png'; loginLogo.alt = 'Logo'; loginLogo.style.cssText = 'width:100%;height:100%;object-fit:cover'; logoFallback(loginLogo); $('#loginLogo').appendChild(loginLogo);
+
+    async function loadMe() {
+      setLoading(true);
+      try {
+        state.me = await api('/api/me');
+        const select = $('#guildSelect');
+        select.innerHTML = state.me.guilds.map(g => `<option value="${esc(g.id)}">${esc(g.name)}</option>`).join('');
+        $('#botStatus').innerHTML = `<span style="margin-right:5px">●</span>${state.me.botOnline ? 'Bot Online' : 'Connecting'}`;
+        if (state.me.commandRegistrationError) toast(`Slash command registration issue: ${state.me.commandRegistrationError}`, 'error');
+        showApp();
+        if (!state.me.guilds.length) {
+          $('#noGuilds').classList.remove('hidden');
+          $$('[data-view]').forEach(section => section.classList.add('hidden'));
+          return;
+        }
+        $('#noGuilds').classList.add('hidden');
+        state.guildId = state.guildId && state.me.guilds.some(g => g.id === state.guildId) ? state.guildId : state.me.guilds[0].id;
+        select.value = state.guildId;
+        await loadGuildData();
+      } catch (error) {
+        if (!String(error.message).includes('sign in')) toast(error.message, 'error');
+        showLogin();
+      } finally { setLoading(false); }
+    }
+    async function loadGuildData() {
+      if (!state.guildId) return;
+      setLoading(true);
+      try {
+        state.data = await api(`/api/guilds/${encodeURIComponent(state.guildId)}/data`);
+        const guild = state.data.guild;
+        $('#sideServerName').textContent = guild.name;
+        $('#sideServerMeta').textContent = `${fmtNumber(guild.memberCount)} members`;
+        $('#statMembers').textContent = fmtNumber(guild.memberCount);
+        renderAll();
+      } catch (error) { toast(error.message, 'error'); }
+      finally { setLoading(false); }
+    }
+    function navigate(view) {
+      if (!VIEW_META[view]) return;
+      state.view = view;
+      $$('[data-view]').forEach(section => section.classList.toggle('hidden', section.dataset.view !== view));
+      $$('[data-nav]').forEach(button => button.classList.toggle('active', button.dataset.nav === view));
+      $('#topTitle').textContent = VIEW_META[view][0]; $('#topSubtitle').textContent = VIEW_META[view][1];
+      if (view === 'panels') renderPanels();
+      if (view === 'permissions') renderPermissions();
+      if (view === 'settings') renderSettings();
+      if (view === 'commands') renderCommandGuide();
+    }
+    function renderAll() { renderOverview(); renderLogs(); renderTickets(); renderPanels(); renderSettings(); renderPermissions(); renderCommandGuide(); navigate(state.view); }
+    function emptyMarkup(icon, title, extra = '') { return `<div class="empty"><div class="empty-icon">${icon}</div>${esc(title)}${extra}</div>`; }
+
+    function renderOverview() {
+      const data = state.data; if (!data) return;
+      const open = data.tickets.filter(t => t.status === 'open').length;
+      $('#statTickets').textContent = fmtNumber(open); $('#ticketStatNote').textContent = `${data.tickets.length - open} closed / archived`;
+      $('#statLogs').textContent = fmtNumber(data.logs.length); $('#statPanels').textContent = fmtNumber(data.panels.length);
+      const latest = data.logs.slice(0, 6);
+      $('#overviewActivity').innerHTML = latest.length ? latest.map(log => `<div class="activity-row"><div class="activity-icon">${iconForAction(log.action)}</div><div class="activity-main"><div class="activity-title">${esc(log.action)}</div><div class="activity-detail">${esc(log.targetTag || log.details || log.reason || 'System event')}${log.reason ? ` · ${esc(log.reason)}` : ''}</div></div><div class="activity-time">${esc(relativeDate(log.timestamp))}</div></div>`).join('') : emptyMarkup('◈','No activity has been logged yet.');
+    }
+    function iconForAction(action) { const s = String(action || '').toLowerCase(); if (s.includes('ticket')) return '▣'; if (s.includes('ban') || s.includes('kick') || s.includes('timeout') || s.includes('warn')) return '⚑'; if (s.includes('message')) return '☷'; if (s.includes('join')) return '＋'; if (s.includes('left')) return '↗'; return '◈'; }
+    function renderLogs() {
+      if (!state.data) return;
+      const query = ($('#logSearch')?.value || '').trim().toLowerCase();
+      const logs = state.data.logs.filter(log => [log.action, log.targetTag, log.targetId, log.moderatorTag, log.reason, log.details].join(' ').toLowerCase().includes(query));
+      $('#logsTable').innerHTML = logs.map(log => `<tr><td><span class="badge ${String(log.action).includes('Banned') || String(log.action).includes('Kicked') ? 'bad' : ''}">${esc(log.action)}</span></td><td><div class="primary-cell">${esc(log.targetTag || '—')}</div><div class="sub-cell">${esc(log.targetId || '')}</div></td><td><div>${esc(log.moderatorTag || 'System')}</div><div class="sub-cell">${esc(log.moderatorId || '')}</div></td><td><div>${esc(log.reason || log.details || '—')}</div>${log.details && log.reason ? `<div class="sub-cell">${esc(log.details)}</div>` : ''}</td><td><div>${esc(fmtDate(log.timestamp))}</div><div class="sub-cell">${esc(relativeDate(log.timestamp))}</div></td></tr>`).join('');
+      $('#logsEmpty').classList.toggle('hidden', logs.length > 0); $('.table-wrap', $('[data-view="logs"]')).classList.toggle('hidden', logs.length === 0);
+    }
+    function renderTickets() {
+      if (!state.data) return;
+      const filter = $('#ticketFilter')?.value || 'all';
+      const tickets = state.data.tickets.filter(t => filter === 'all' || t.status === filter).sort((a,b) => (a.status === 'open' ? -1 : 1) - (b.status === 'open' ? -1 : 1));
+      $('#ticketsTable').innerHTML = tickets.map(ticket => {
+        const channelUrl = `https://discord.com/channels/${state.guildId}/${ticket.channelId}`;
+        const transcript = ticket.transcriptFile ? `<a href="/api/guilds/${encodeURIComponent(state.guildId)}/transcripts/${encodeURIComponent(ticket.transcriptFile)}" target="_blank" rel="noopener">Download ↗</a>` : '<span class="muted">Not saved</span>';
+        return `<tr><td><span class="badge ${ticket.status === 'open' ? 'good' : ''}">${esc(ticket.status)}</span></td><td><div class="primary-cell"><a href="${esc(channelUrl)}" target="_blank" rel="noopener">#${esc(ticket.channelName || ticket.channelId)} ↗</a></div><div class="sub-cell">${esc(ticket.channelId)}</div></td><td><div>${esc(ticket.ownerTag || 'Unknown')}</div><div class="sub-cell">${esc(ticket.ownerId || '')}</div></td><td><div>${esc(fmtDate(ticket.createdAt))}</div><div class="sub-cell">${ticket.closedAt ? `Closed ${esc(fmtDate(ticket.closedAt))}` : 'Still open'}</div></td><td>${transcript}</td></tr>`;
+      }).join('');
+      $('#ticketsEmpty').classList.toggle('hidden', tickets.length > 0); $('.table-wrap', $('[data-view="tickets"]')).classList.toggle('hidden', tickets.length === 0);
+    }
+
+    function channelOptions(types = ['text','news']) {
+      const channels = state.data?.channels || [];
+      return channels.filter(ch => types.includes(ch.type === 4 ? 'category' : ch.type === 5 ? 'news' : 'text'));
+    }
+    function channelSelectMarkup(selected, types = ['text','news'], allowNone = true) {
+      const opts = channelOptions(types);
+      const first = allowNone ? '<option value="">— Not configured —</option>' : '<option value="">Choose a channel…</option>';
+      return first + opts.map(ch => `<option value="${esc(ch.id)}" ${ch.id === selected ? 'selected' : ''}>${types.includes('category') && ch.type === 4 ? '▰ ' : '⌗ '}${esc(ch.name)}</option>`).join('');
+    }
+    function roleSelectMarkup(selectedIds = [], multiple = true) {
+      const selected = new Set(selectedIds || []);
+      return (state.data?.roles || []).map(role => `<option value="${esc(role.id)}" ${selected.has(role.id) ? 'selected' : ''}>${esc(role.name)}${role.color && role.color !== '#000000' ? ' · '+esc(role.color) : ''}</option>`).join('');
+    }
+    function selectedValues(select) { return [...select.selectedOptions].map(option => option.value).filter(Boolean); }
+
+    function makeNewDraft() {
+      state.selectedPanelId = null;
+      state.panelDraft = { name:'New support panel', panelType:'ticket', title:'Need help?', description:'Click the button below to open a private support ticket.', color:state.data?.settings.embedColor || '#7C5CFC', footer:state.data?.settings.footerText || 'Support team', buttonLabel:'Create Ticket', buttonStyle:'primary', buttonEmoji:'🎫', buttonReply:'Thanks! Your button was clicked.', channelId:state.data?.settings.logChannelId || '', messageId:null };
+      renderPanels();
+    }
+    function draftFromFields() {
+      const draft = {};
+      $$('[data-panel-field]').forEach(field => draft[field.dataset.panelField] = field.value);
+      return draft;
+    }
+    function setPanelField(key, value) { const element = $(`[data-panel-field="${key}"]`); if (element) element.value = value ?? ''; }
+    function drawPanelList() {
+      const panels = state.data?.panels || [];
+      $('#panelCount').textContent = String(panels.length);
+      $('#panelList').innerHTML = panels.length ? panels.map(panel => `<button type="button" class="panel-item ${panel.id === state.selectedPanelId ? 'active' : ''}" data-panel-select="${esc(panel.id)}"><div class="panel-item-name">${esc(panel.name)}</div><div class="panel-item-meta">${panel.panelType === 'ticket' ? '▣ Ticket panel' : '▤ Custom panel'} · ${panel.messageId ? 'Published' : 'Draft'}</div></button>`).join('') : '<div class="empty" style="padding:20px 6px">No panels yet.</div>';
+    }
+    function renderPanels() {
+      if (!state.data) return;
+      if (state.selectedPanelId && !state.data.panels.some(p => p.id === state.selectedPanelId)) state.selectedPanelId = null;
+      if (!state.panelDraft || (state.selectedPanelId && state.panelDraft.id !== state.selectedPanelId)) {
+        const panel = state.data.panels.find(p => p.id === state.selectedPanelId) || state.data.panels[0];
+        if (panel) { state.selectedPanelId = panel.id; state.panelDraft = { ...panel }; }
+        else { state.selectedPanelId = null; state.panelDraft = { name:'New support panel', panelType:'ticket', title:'Need help?', description:'Click the button below to open a private support ticket.', color:state.data.settings.embedColor || '#7C5CFC', footer:state.data.settings.footerText || 'Support team', buttonLabel:'Create Ticket', buttonStyle:'primary', buttonEmoji:'🎫', buttonReply:'Thanks! Your button was clicked.', channelId:'', messageId:null }; }
+      }
+      drawPanelList();
+      const d = state.panelDraft;
+      for (const key of ['name','panelType','title','description','color','footer','buttonLabel','buttonStyle','buttonEmoji','buttonReply','channelId']) setPanelField(key, d[key]);
+      $('#panelChannel').innerHTML = channelSelectMarkup(d.channelId, ['text','news'], false);
+      $('#panelSaveState').textContent = state.selectedPanelId ? (d.messageId ? 'Published' : 'Saved draft') : 'Unsaved';
+      $('#deletePanelButton').disabled = !state.selectedPanelId;
+      $('#publishPanelButton').disabled = false;
+      $('#publishPanelTop').disabled = false;
+      $('#buttonReplyField').classList.toggle('hidden', d.panelType !== 'custom');
+      updatePanelPreview();
+    }
+    function updatePanelPreview() {
+      if (!state.panelDraft) return;
+      const d = draftFromFields();
+      $('#previewTitle').textContent = d.title || ' '; $('#previewDescription').textContent = d.description || ' '; $('#previewFooter').textContent = d.footer || ' ';
+      $('#previewEmbed').style.borderLeftColor = /^#[0-9a-fA-F]{6}$/.test(d.color) ? d.color : '#7C5CFC';
+      const styleColors = { primary:'#5865f2', secondary:'#4e5058', success:'#248046', danger:'#da373c' };
+      $('#previewButton').style.background = styleColors[d.buttonStyle] || styleColors.primary;
+      $('#previewButton').textContent = `${d.buttonEmoji ? d.buttonEmoji+' ' : ''}${d.buttonLabel || 'Open'}`;
+      $('#previewNote').textContent = d.panelType === 'ticket' ? 'Ticket panels create private channels and grant access to configured support roles. A member can have one open ticket at a time.' : `Custom panel buttons reply privately: “${d.buttonReply || 'Thanks!'}”`;
+      state.panelDraft = { ...state.panelDraft, ...d };
+    }
+    async function savePanel(event) {
+      if (event) event.preventDefault();
+      if (!state.data) return false;
+      const draft = draftFromFields();
+      if (!draft.name.trim()) { toast('Please enter an internal panel name.', 'error'); return false; }
+      try {
+        setLoading(true);
+        let result;
+        if (state.selectedPanelId) result = await api(`/api/guilds/${encodeURIComponent(state.guildId)}/panels/${encodeURIComponent(state.selectedPanelId)}`, { method:'PATCH', body:JSON.stringify(draft) });
+        else result = await api(`/api/guilds/${encodeURIComponent(state.guildId)}/panels`, { method:'POST', body:JSON.stringify(draft) });
+        state.selectedPanelId = result.panel.id; state.panelDraft = { ...result.panel };
+        state.data.panels = state.data.panels.filter(p => p.id !== result.panel.id); state.data.panels.unshift(result.panel);
+        renderPanels(); renderOverview(); toast('Panel design saved.');
+        return true;
+      } catch (error) { toast(error.message, 'error'); return false; }
+      finally { setLoading(false); }
+    }
+    async function publishPanel() {
+      const saved = await savePanel();
+      if (!saved || !state.selectedPanelId) return;
+      try {
+        setLoading(true);
+        const channelId = $('#panelChannel').value;
+        const result = await api(`/api/guilds/${encodeURIComponent(state.guildId)}/panels/${encodeURIComponent(state.selectedPanelId)}/publish`, { method:'POST', body:JSON.stringify({ channelId }) });
+        state.panelDraft = { ...result.panel }; const i = state.data.panels.findIndex(p => p.id === result.panel.id); if (i >= 0) state.data.panels[i] = result.panel;
+        renderPanels(); renderOverview(); toast('Panel published to Discord.');
+        if (result.messageUrl) window.open(result.messageUrl, '_blank', 'noopener');
+      } catch (error) { toast(error.message, 'error'); }
+      finally { setLoading(false); }
+    }
+    async function deletePanel() {
+      if (!state.selectedPanelId || !confirm('Remove this saved panel? If it was published, the bot will also try to delete its Discord message.')) return;
+      try {
+        setLoading(true); await api(`/api/guilds/${encodeURIComponent(state.guildId)}/panels/${encodeURIComponent(state.selectedPanelId)}`, { method:'DELETE' });
+        state.data.panels = state.data.panels.filter(p => p.id !== state.selectedPanelId); state.selectedPanelId = null; state.panelDraft = null; renderPanels(); renderOverview(); toast('Panel removed.');
+      } catch (error) { toast(error.message, 'error'); }
+      finally { setLoading(false); }
+    }
+
+    function renderSettings() {
+      if (!state.data) return;
+      const s = state.data.settings;
+      $('#settingLogChannel').innerHTML = channelSelectMarkup(s.logChannelId, ['text','news']);
+      $('#settingTicketCategory').innerHTML = channelSelectMarkup(s.ticketCategoryId, ['category']);
+      $('#settingWelcomeChannel').innerHTML = channelSelectMarkup(s.welcomeChannelId, ['text','news']);
+      $('#settingWelcomeMessage').value = s.welcomeMessage || '';
+      $('#settingEmbedColor').value = s.embedColor || '#7C5CFC'; $('#settingColorPicker').value = /^#[0-9a-fA-F]{6}$/.test(s.embedColor || '') ? s.embedColor : '#7c5cfc';
+      $('#settingFooter').value = s.footerText || '';
+      $('#settingSupportRoles').innerHTML = roleSelectMarkup(s.supportRoleIds, true);
+      $('#settingModeratorRoles').innerHTML = roleSelectMarkup(s.moderatorRoleIds, true);
+    }
+    async function saveSettings(event, extra = {}) {
+      if (event) event.preventDefault();
+      const body = { ...extra };
+      if (!event && !Object.keys(extra).length) return;
+      if (event?.target?.id === 'settingsForm') {
+        body.logChannelId = $('#settingLogChannel').value; body.ticketCategoryId = $('#settingTicketCategory').value;
+        body.welcomeChannelId = $('#settingWelcomeChannel').value; body.welcomeMessage = $('#settingWelcomeMessage').value;
+        body.embedColor = $('#settingEmbedColor').value; body.footerText = $('#settingFooter').value;
+      }
+      try {
+        setLoading(true); const result = await api(`/api/guilds/${encodeURIComponent(state.guildId)}/settings`, { method:'PATCH', body:JSON.stringify(body) });
+        state.data.settings = result.settings; renderSettings(); toast('Server settings saved.');
+      } catch (error) { toast(error.message, 'error'); }
+      finally { setLoading(false); }
+    }
+
+    function renderPermissions() {
+      if (!state.data) return;
+      const descriptions = Object.fromEntries([...MOD_COMMANDS, ...TICKET_COMMANDS].map(([command, description, permission]) => [command.split(' ')[0].slice(1), { description, permission }]));
+      const names = state.data.commandNames || [];
+      $('#permissionCommandCount').textContent = `${names.length} commands`;
+      $('#commandPermissionList').innerHTML = names.map(name => {
+        const rule = state.data.commandPermissions?.[name] || { roleIds:[] };
+        const disabled = state.data.disabledCommands.includes(name);
+        const info = descriptions[name] || { description: name === 'ticket' ? 'Ticket setup, close, add/remove members and transcript tools.' : 'Bot command.', permission:'See Discord permissions' };
+        return `<div class="command-row" data-command-row="${esc(name)}"><div class="command-command"><div class="command-name">/${esc(name)}</div><div class="command-desc">${esc(info.description)}</div><div class="sub-cell">Default: ${esc(info.permission)}</div></div><div class="command-role-field"><select multiple data-command-roles="${esc(name)}" aria-label="Allowed roles for ${esc(name)}">${roleSelectMarkup(rule.roleIds || [], true)}</select><div class="sub-cell">No roles selected = use Discord permissions</div></div><label class="toggle"><input type="checkbox" data-command-disabled="${esc(name)}" ${disabled ? 'checked' : ''}><span>Disabled</span></label><button type="button" class="btn small-btn command-save" data-command-save="${esc(name)}">Save</button></div>`;
+      }).join('');
+    }
+    async function saveCommandRule(name) {
+      const roleSelect = $(`[data-command-roles="${name}"]`); const disabled = $(`[data-command-disabled="${name}"]`).checked;
+      try {
+        const result = await api(`/api/guilds/${encodeURIComponent(state.guildId)}/commands/${encodeURIComponent(name)}`, { method:'PUT', body:JSON.stringify({ roleIds:selectedValues(roleSelect), disabled }) });
+        state.data.disabledCommands = result.disabledCommands; state.data.commandPermissions[name] = result.commandPermission;
+        toast(`/${name} permissions saved.`);
+      } catch (error) { toast(error.message, 'error'); renderPermissions(); }
+    }
+
+    function renderCommandGuide() {
+      const draw = rows => rows.map(([command, description, permission]) => `<div class="activity-row"><div class="activity-icon">⌘</div><div class="activity-main"><div class="activity-title"><span class="inline-code">${esc(command)}</span></div><div class="activity-detail">${esc(description)}</div><div class="sub-cell">Requires: ${esc(permission)}</div></div></div>`).join('');
+      $('#moderationCommandGuide').innerHTML = draw(MOD_COMMANDS);
+      $('#ticketCommandGuide').innerHTML = draw(TICKET_COMMANDS);
+    }
+
+    $('#loginForm').addEventListener('submit', async event => {
+      event.preventDefault(); $('#loginError').style.display = 'none';
+      try { setLoading(true); await api('/api/login', { method:'POST', body:JSON.stringify({ password:$('#dashboardPassword').value }) }); $('#dashboardPassword').value = ''; await loadMe(); if (state.me?.guilds?.length) showApp(); }
+      catch (error) { $('#loginError').textContent = error.message; $('#loginError').style.display = 'block'; }
+      finally { setLoading(false); }
+    });
+    $('#logoutButton').addEventListener('click', async () => { try { await api('/api/logout', { method:'POST', body:JSON.stringify({}) }); } catch {} state.me = null; state.data = null; showLogin(); toast('Signed out.'); });
+    $('#guildSelect').addEventListener('change', async event => { state.guildId = event.target.value; state.panelDraft = null; state.selectedPanelId = null; await loadGuildData(); });
+    $$('[data-nav]').forEach(button => button.addEventListener('click', () => navigate(button.dataset.nav)));
+    $$('[data-goto]').forEach(button => button.addEventListener('click', () => navigate(button.dataset.goto)));
+    $('#refreshOverview').addEventListener('click', loadGuildData); $('#refreshLogs').addEventListener('click', loadGuildData); $('#refreshTickets').addEventListener('click', loadGuildData); $('#refreshSettings').addEventListener('click', loadGuildData); $('#refreshPermissions').addEventListener('click', loadGuildData); $('#refreshEmpty').addEventListener('click', loadMe);
+    $('#logSearch').addEventListener('input', renderLogs); $('#ticketFilter').addEventListener('change', renderTickets);
+    $('#newPanelButton').addEventListener('click', makeNewDraft); $('#publishPanelTop').addEventListener('click', publishPanel); $('#publishPanelButton').addEventListener('click', publishPanel); $('#deletePanelButton').addEventListener('click', deletePanel); $('#panelForm').addEventListener('submit', savePanel);
+    $('#panelList').addEventListener('click', event => { const item = event.target.closest('[data-panel-select]'); if (!item) return; state.selectedPanelId = item.dataset.panelSelect; state.panelDraft = null; renderPanels(); });
+    $$('[data-panel-field]').forEach(field => field.addEventListener('input', updatePanelPreview));
+    $('#panelColorPicker').addEventListener('input', event => { $('#panelColor').value = event.target.value.toUpperCase(); updatePanelPreview(); });
+    $('#panelColor').addEventListener('input', event => { if (/^#[0-9a-fA-F]{6}$/.test(event.target.value)) $('#panelColorPicker').value = event.target.value; updatePanelPreview(); });
+    $('#settingsForm').addEventListener('submit', event => saveSettings(event));
+    $('#settingColorPicker').addEventListener('input', event => { $('#settingEmbedColor').value = event.target.value.toUpperCase(); });
+    $('#settingEmbedColor').addEventListener('input', event => { if (/^#[0-9a-fA-F]{6}$/.test(event.target.value)) $('#settingColorPicker').value = event.target.value; });
+    $('#saveSupportRoles').addEventListener('click', () => saveSettings(null, { supportRoleIds:selectedValues($('#settingSupportRoles')) }));
+    $('#saveModeratorRoles').addEventListener('click', () => saveSettings(null, { moderatorRoleIds:selectedValues($('#settingModeratorRoles')) }));
+    $('#commandPermissionList').addEventListener('click', event => { const button = event.target.closest('[data-command-save]'); if (button) saveCommandRule(button.dataset.commandSave); });
+
+    loadMe();
+  </script>
+</body>
+</html>
