@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>EclipseMC Dashboard</title>
+<style>
+:root{--bg:#120f1d;--s1:#1b1730;--s2:#251f40;--bd:#352d5a;--tx:#efeaff;--mu:#9b92c4;--gold:#e8b64c;--vi:#7c5cff;--ok:#43d391;--bad:#ff5d7a}
+*{box-sizing:border-box}html,body{margin:0}body{background:var(--bg);color:var(--tx);font:14px/1.5 'Avenir Next','Segoe UI',system-ui,sans-serif}
+button,input,select,textarea{font:inherit;color:inherit}
+input,select,textarea{width:100%;background:var(--s2);border:1px solid var(--bd);border-radius:8px;padding:9px 11px;outline:0}
+input:focus,select:focus,textarea:focus,button:focus-visible{border-color:var(--gold);box-shadow:0 0 0 2px #e8b64c44}
+select[multiple]{height:110px}textarea{min-height:80px;resize:vertical}label{display:block;color:var(--mu);margin:12px 0 4px;font-size:13px}
+.btn{background:var(--s2);border:1px solid var(--bd);border-radius:8px;padding:8px 14px;cursor:pointer}.btn:hover{border-color:var(--gold)}
+.pri{background:var(--gold);color:#241a05;border-color:var(--gold);font-weight:700}.dng{color:var(--bad)}
+#app{display:grid;grid-template-columns:230px 1fr;min-height:100vh}
+nav{background:var(--s1);border-right:1px solid var(--bd);padding:18px 12px;position:sticky;top:0;height:100vh}
+.brand{display:flex;align-items:center;gap:10px;font-weight:800;font-size:17px;padding:4px 8px 18px}.brand img{width:34px;height:34px;border-radius:9px}
+nav a{display:block;padding:10px 12px;border-radius:8px;color:var(--mu);cursor:pointer;margin-bottom:2px}nav a.on{background:var(--s2);color:var(--gold);font-weight:700}
+main{padding:26px;max-width:1100px;width:100%}h1{margin:0 0 4px;font-size:24px}.sub{color:var(--mu);margin:0 0 22px}
+.card{background:var(--s1);border:1px solid var(--bd);border-radius:12px;padding:16px;margin-bottom:14px}
+.grid{display:grid;gap:14px;grid-template-columns:repeat(auto-fit,minmax(200px,1fr))}.two{display:grid;gap:18px;grid-template-columns:1fr 1fr}
+.stat b{display:block;font-size:34px;color:var(--gold);line-height:1.1}.row{display:flex;align-items:center;gap:12px;justify-content:space-between;flex-wrap:wrap}
+.tag{padding:2px 9px;border-radius:99px;font-size:12px;background:var(--s2)}.open{color:var(--ok)}.closed{color:var(--mu)}
+table{width:100%;border-collapse:collapse}td,th{padding:9px 8px;border-bottom:1px solid var(--bd);text-align:left;vertical-align:top}th{color:var(--mu);font-weight:600}
+.wrap{overflow-x:auto}.prev{border-left:4px solid var(--vi);background:#2b2b31;border-radius:6px;padding:12px;color:#ddd}.prev h4{margin:0 0 6px;color:#fff;font-size:15px}.prev .b{display:inline-block;margin-top:10px;padding:6px 14px;border-radius:5px;color:#fff;font-weight:600}
+.modal{position:fixed;inset:0;background:#000b;display:flex;align-items:center;justify-content:center;padding:14px;z-index:5}.modal>div{background:var(--s1);border:1px solid var(--bd);border-radius:12px;width:min(720px,100%);max-height:86vh;overflow:auto;padding:18px}
+.msg{padding:6px 0;border-bottom:1px solid var(--bd)}.msg small{color:var(--mu)}
+#toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:var(--s2);border:1px solid var(--gold);padding:10px 18px;border-radius:99px;display:none;z-index:9}#toast.bad{border-color:var(--bad)}
+#login{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:16px}#login .card{width:min(380px,100%);padding:26px}
+@media(max-width:800px){#app{grid-template-columns:1fr}nav{position:static;height:auto;display:flex;overflow-x:auto;gap:4px;padding:10px;border-right:0;border-bottom:1px solid var(--bd)}.brand{padding:0 10px 0 4px}nav a{white-space:nowrap;margin:0}.two{grid-template-columns:1fr}main{padding:16px}}
+</style></head><body>
+<div id="login" hidden><div class="card"><div class="brand"><img src="/logo.png" alt="" onerror="this.style.display='none'">EclipseMC</div>
+<label>Dashboard password</label><input id="pw" type="password" autocomplete="current-password" onkeydown="event.key==='Enter'&&login()">
+<button class="btn pri" style="width:100%;margin-top:16px" onclick="login()">Sign in</button></div></div>
+<div id="app" hidden><nav id="nav"></nav><main id="main"></main></div><div id="toast"></div>
+<script>
+const $=s=>document.querySelector(s);let T=localStorage.getItem('t'),S={v:'overview',edit:null},D={};
+const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+function toast(m,bad){const t=$('#toast');t.textContent=m;t.className=bad?'bad':'';t.style.display='block';clearTimeout(toast.h);toast.h=setTimeout(()=>t.style.display='none',2800)}
+async function api(p,m='GET',b){const r=await fetch('/api/'+p,{method:m,headers:{'content-type':'application/json',authorization:'Bearer '+T},body:b?JSON.stringify(b):undefined});
+ const j=await r.json().catch(()=>({}));if(r.status===401&&p!=='login'){logout();throw 0}if(!r.ok){toast(j.error||'Request failed',1);throw 0}return j}
+async function login(){try{const j=await api('login','POST',{password:$('#pw').value});T=j.token;localStorage.setItem('t',T);boot()}catch{}}
+function logout(){localStorage.removeItem('t');T=null;$('#app').hidden=true;$('#login').hidden=false}
+const NAV=[['overview','Overview'],['commands','Commands & permissions'],['panels','Ticket panels'],['tickets','Ticket logs'],['cases','Mod logs'],['settings','Settings']];
+async function boot(){if(!T)return logout();try{
+ [D.meta,D.cmds,D.cfg,D.panels,D.tickets,D.cases]=await Promise.all(['meta','commands','config','panels','tickets','cases'].map(x=>api(x)))}catch{return}
+ $('#login').hidden=true;$('#app').hidden=false;render()}
+function render(){$('#nav').innerHTML=`<div class="brand"><img src="/logo.png" alt="" onerror="this.style.display='none'">EclipseMC</div>`+NAV.map(([k,l])=>`<a class="${S.v===k?'on':''}" onclick="go('${k}')">${l}</a>`).join('')+`<a onclick="logout()">Sign out</a>`;
+ $('#main').innerHTML=V[S.v]()}
+function go(v){S.v=v;S.edit=null;render()}
+const opts=(l,sel,blank)=>(blank?`<option value="">${blank}</option>`:'')+l.map(x=>`<option value="${x.id}" ${[].concat(sel).includes(x.id)?'selected':''}>${esc(x.name)}</option>`).join('');
+const txt=()=>D.meta.channels.filter(c=>c.type!==4),cats=()=>D.meta.channels.filter(c=>c.type===4);
+const date=t=>t?new Date(t).toLocaleString():'-',val=id=>$('#'+id)?.value,multi=id=>[...$('#'+id).selectedOptions].map(o=>o.value);
+const head=(t,s)=>`<h1>${t}</h1><p class="sub">${s}</p>`;
+const V={
+overview:()=>{const s=D.meta.stats;return head('Overview',D.meta.ready?`Connected to ${esc(D.meta.guild.name)} - ${D.meta.ping}ms latency`:'The bot is not in your server yet. Check GUILD_ID and invite the bot.')+
+ `<div class="grid">${[['Members',D.meta.guild?.members??0],['Open tickets',s?.open??0],['Total tickets',s?.total??0],['Mod cases',s?.cases??0],['Panels',s?.panels??0]].map(([l,n])=>`<div class="card stat"><b>${n}</b>${l}</div>`).join('')}</div>
+ <div class="card"><b>Quick start</b><p class="sub" style="margin:6px 0 0">Set your log channels in Settings, build a panel under Ticket panels, then send it to a channel.</p></div>`},
+commands:()=>head('Commands & permissions','Turn commands off or restrict them to specific roles. Administrators can always use enabled commands. Empty roles = default Discord permission.')+
+ D.cmds.map(c=>`<div class="card"><div class="row"><div><b>/${c.n}</b> ${c.mod?'<span class="tag">moderation</span>':''}<div class="sub" style="margin:0">${esc(c.d)}</div></div>
+ <label style="margin:0;display:flex;gap:8px;align-items:center;color:var(--tx)"><input type="checkbox" style="width:auto" id="e_${c.n}" ${D.cfg.disabled.includes(c.n)?'':'checked'} onchange="saveCmd('${c.n}')">Enabled</label></div>
+ <label>Allowed roles (hold to select several)</label><select multiple id="r_${c.n}" onchange="saveCmd('${c.n}')">${opts(D.meta.roles,D.cfg.perms[c.n]||[])}</select></div>`).join(''),
+panels:()=>{if(S.edit)return editor();return head('Ticket panels','Design the message members click to open a ticket.')+`<button class="btn pri" onclick="newPanel()">Create panel</button><div style="height:14px"></div>`+
+ (D.panels.map(p=>`<div class="card"><div class="row"><div><b>${esc(p.name||p.title)}</b><div class="sub" style="margin:0">${p.messageId?'Live in <#'+p.channelId+'>':'Not sent yet'}</div></div>
+ <div class="row"><button class="btn" onclick="editPanel('${p.id}')">Edit</button><button class="btn dng" onclick="delPanel('${p.id}')">Remove</button></div></div>
+ <div class="row" style="margin-top:12px"><select id="send_${p.id}" style="flex:1">${opts(txt(),p.channelId||'','Choose channel')}</select><button class="btn" onclick="sendPanel('${p.id}')">${p.messageId?'Resend':'Send'} panel</button></div></div>`).join('')||'<div class="card sub">No panels yet. Create your first one.</div>')},
+tickets:()=>head('Ticket logs','Latest 300 tickets with saved transcripts.')+`<div class="card wrap"><table><tr><th>#</th><th>User</th><th>Panel</th><th>Status</th><th>Opened</th><th></th></tr>`+
+ D.tickets.map(t=>`<tr><td>${t.id}</td><td>${esc(t.userTag)}${t.claimedBy?'<br><small class="sub">claimed</small>':''}</td><td>${esc(t.panelName)}</td><td class="${t.status}">${t.status}</td><td>${date(t.createdAt)}</td>
+ <td><button class="btn" onclick="viewT(${t.id})">Transcript</button> ${t.status==='open'?`<button class="btn dng" onclick="closeT(${t.id})">Close</button>`:''}</td></tr>`).join('')+`</table></div>`,
+cases:()=>head('Mod logs','Every ban, kick, timeout, warning and purge.')+`<div class="card wrap"><table><tr><th>Case</th><th>Type</th><th>User</th><th>Moderator</th><th>Reason</th><th>Date</th></tr>`+
+ D.cases.map(c=>`<tr><td>#${c.id}</td><td><span class="tag">${c.type}</span></td><td>${esc(c.userTag)}</td><td>${esc(c.modTag)}</td><td>${esc(c.reason)}</td><td>${date(c.at)}</td></tr>`).join('')+`</table></div>`,
+settings:()=>head('Settings','Log channels and staff roles.')+`<div class="card"><label>Moderation log channel</label><select id="s_log">${opts(txt(),D.cfg.logChannel,'None')}</select>
+ <label>Default ticket log channel (used when a panel has none)</label><select id="s_tlog">${opts(txt(),D.cfg.ticketLogChannel,'None')}</select>
+ <label>Moderator roles (can use all moderation commands)</label><select multiple id="s_mod">${opts(D.meta.roles,D.cfg.modRoles)}</select>
+ <label style="display:flex;gap:8px;align-items:center;color:var(--tx)"><input type="checkbox" style="width:auto" id="s_dm" ${D.cfg.dmOnAction?'checked':''}>DM members when they are punished</label>
+ <button class="btn pri" style="margin-top:16px" onclick="saveSettings()">Save settings</button></div>`};
+async function putCfg(){D.cfg=await api('config','PUT',D.cfg)}
+async function saveCmd(n){const off=!$('#e_'+n).checked;D.cfg.disabled=D.cfg.disabled.filter(x=>x!==n);if(off)D.cfg.disabled.push(n);D.cfg.perms[n]=multi('r_'+n);await putCfg();toast('Saved /'+n)}
+async function saveSettings(){Object.assign(D.cfg,{logChannel:val('s_log'),ticketLogChannel:val('s_tlog'),modRoles:multi('s_mod'),dmOnAction:$('#s_dm').checked});await putCfg();toast('Settings saved')}
+const PF=['name','title','description','color','buttonLabel','buttonEmoji','buttonStyle','categoryId','logChannel','welcome','prefix','image','footer','maxOpen'];
+const newPanel=()=>{S.edit={color:'#7c5cff',buttonLabel:'Open ticket',buttonStyle:'Primary',prefix:'ticket',maxOpen:1,roles:[],title:'EclipseMC Support',description:'Need help? Click the button below to open a ticket.',welcome:'Hello {user}, staff will be with you shortly.'};render()};
+const editPanel=id=>{S.edit={...D.panels.find(p=>p.id===id)};render()};
+function editor(){const p=S.edit;const f=(k,l,t='text')=>`<label>${l}</label><input id="p_${k}" type="${t}" value="${esc(p[k])}" oninput="prev()">`;
+ return head(p.id?'Edit panel':'New panel','Changes to live panels update the posted message when you save.')+`<div class="two"><div class="card">${f('name','Panel name (dashboard only)')}${f('title','Embed title')}
+ <label>Embed description</label><textarea id="p_description" oninput="prev()">${esc(p.description)}</textarea>${f('color','Embed color','color')}${f('image','Image URL (optional)')}${f('footer','Footer text (optional)')}
+ ${f('buttonLabel','Button label')}${f('buttonEmoji','Button emoji (optional)')}<label>Button color</label><select id="p_buttonStyle" onchange="prev()">${['Primary','Secondary','Success','Danger'].map(s=>`<option ${p.buttonStyle===s?'selected':''}>${s}</option>`).join('')}</select>
+ </div><div><div class="card"><label style="margin-top:0">Preview</label><div class="prev" id="pv"></div></div><div class="card"><label style="margin-top:0">Ticket behavior</label>
+ <label>Category for new tickets</label><select id="p_categoryId">${opts(cats(),p.categoryId,'No category')}</select><label>Support roles (can see and manage tickets)</label><select multiple id="p_roles">${opts(D.meta.roles,p.roles||[])}</select>
+ <label>Log channel for this panel</label><select id="p_logChannel">${opts(txt(),p.logChannel,'Use default')}</select>${f('prefix','Channel name prefix')}${f('maxOpen','Max open tickets per user','number')}
+ <label>Welcome message ({user} and {panel} available)</label><textarea id="p_welcome">${esc(p.welcome)}</textarea></div></div></div>
+ <div class="row" style="justify-content:flex-start"><button class="btn pri" onclick="savePanel()">Save panel</button><button class="btn" onclick="go('panels')">Cancel</button></div><script>prev()<\/script>`}
+function prev(){const g=k=>val('p_'+k)??'';const e=$('#pv');if(!e)return;const c={Primary:'#5865f2',Secondary:'#4e5058',Success:'#248046',Danger:'#da373c'}[g('buttonStyle')];
+ e.style.borderLeftColor=g('color');e.innerHTML=`<h4>${esc(g('title'))}</h4><div>${esc(g('description')).replace(/\n/g,'<br>')}</div>${g('image')?`<img src="${esc(g('image'))}" style="max-width:100%;border-radius:6px;margin-top:8px">`:''}<span class="b" style="background:${c}">${esc(g('buttonEmoji'))} ${esc(g('buttonLabel'))}</span>${g('footer')?`<div style="font-size:12px;margin-top:8px;color:#aaa">${esc(g('footer'))}</div>`:''}`}
+setInterval(()=>{if(S.edit&&$('#pv')&&!$('#pv').innerHTML)prev()},300);
+async function savePanel(){const b={};PF.forEach(k=>b[k]=val('p_'+k));b.roles=multi('p_roles');const id=S.edit.id;
+ try{await api(id?'panels/'+id:'panels',id?'PUT':'POST',b);D.panels=await api('panels');toast('Panel saved');go('panels')}catch{}}
+async function sendPanel(id){const c=val('send_'+id);if(!c)return toast('Choose a channel first',1);try{await api(`panels/${id}/send`,'POST',{channelId:c});D.panels=await api('panels');toast('Panel sent');render()}catch{}}
+async function delPanel(id){if(!confirm('Remove this panel and delete its message?'))return;await api('panels/'+id,'DELETE');D.panels=await api('panels');toast('Panel removed');render()}
+async function viewT(id){try{const m=await api(`tickets/${id}/transcript`);const d=document.createElement('div');d.className='modal';d.onclick=e=>{if(e.target===d)d.remove()};
+ d.innerHTML=`<div><div class="row"><b>Ticket #${id} transcript</b><button class="btn" onclick="this.closest('.modal').remove()">Close</button></div>`+(m.map(x=>`<div class="msg"><b>${esc(x.a)}</b> <small>${date(x.at)}</small><div>${esc(x.c)}${x.e?' <small>[embed]</small>':''}</div>${x.f.map(u=>`<a href="${esc(u)}" target="_blank" rel="noopener" style="color:var(--gold)">attachment</a>`).join(' ')}</div>`).join('')||'<p class="sub">Empty.</p>')+`</div>`;document.body.appendChild(d)}catch{}}
+async function closeT(id){if(!confirm('Close ticket #'+id+'?'))return;await api(`tickets/${id}/close`,'POST');toast('Closing ticket...');setTimeout(async()=>{D.tickets=await api('tickets');render()},2500)}
+boot();
+</script></body></html>
