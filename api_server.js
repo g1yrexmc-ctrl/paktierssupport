@@ -24,6 +24,7 @@ const {
   ButtonStyle,
   AttachmentBuilder,
   Events,
+  MessageFlags,
 } = require('discord.js');
 
 const APP_ROOT = __dirname;
@@ -165,7 +166,7 @@ function hexColor(value, fallback = '#7C5CFC') {
 }
 
 function ephemeral(content) {
-  return { content: clip(content, 1900), ephemeral: true, allowedMentions: { parse: [] } };
+  return { content: clip(content, 1900), flags: MessageFlags.Ephemeral, allowedMentions: { parse: [] } };
 }
 
 function safeError(error) {
@@ -646,7 +647,7 @@ async function handleModerationCommand(interaction) {
     if (sub === 'transcript') {
       if (!isOwner && !isStaff) throw new Error('Only the ticket owner or configured support staff can export this transcript.');
       const transcript = await createTranscript(interaction.channel);
-      return interaction.reply({ content: 'Here is the current ticket transcript.', files: [new AttachmentBuilder(transcript.buffer, { name: transcript.filename })], ephemeral: true });
+      return interaction.reply({ content: 'Here is the current ticket transcript.', files: [new AttachmentBuilder(transcript.buffer, { name: transcript.filename })], flags: MessageFlags.Ephemeral });
     }
     if (!isStaff) throw new Error('Only configured support staff can add or remove members.');
     const target = options.getUser('user', true);
@@ -675,7 +676,7 @@ async function handleModerationCommand(interaction) {
       const text = list.length
         ? list.map((warning, i) => `${i + 1}. ${warning.reason} — <@${warning.moderatorId}> · <t:${Math.floor(new Date(warning.timestamp).getTime() / 1000)}:R>`).join('\n')
         : 'No warnings recorded for that member.';
-      return interaction.reply({ content: clip(`Warnings for ${targetUser.tag}\n${text}`, 1900), ephemeral: true, allowedMentions: { parse: [] } });
+      return interaction.reply({ content: clip(`Warnings for ${targetUser.tag}\n${text}`, 1900), flags: MessageFlags.Ephemeral, allowedMentions: { parse: [] } });
     }
     if (name === 'warn') {
       const warnTargetMember = await guild.members.fetch(targetUser.id).catch(() => null);
@@ -743,7 +744,7 @@ async function handleModerationCommand(interaction) {
       const when = Math.floor(new Date(record.timestamp).getTime() / 1000);
       return `• **${record.action}** — ${record.targetTag || 'No target'} — <t:${when}:R>${record.reason ? `\n  Reason: ${record.reason}` : ''}`;
     }).join('\n') : 'No matching logs found.';
-    return interaction.reply({ content: clip(text, 1900), ephemeral: true, allowedMentions: { parse: [] } });
+    return interaction.reply({ content: clip(text, 1900), flags: MessageFlags.Ephemeral, allowedMentions: { parse: [] } });
   }
 }
 
@@ -826,7 +827,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
     if (kind === 'ticket' && action === 'create') {
       const panel = gData.panels.find(item => item.id === panelId);
       if (!panel || panel.panelType !== 'ticket') return interaction.reply(ephemeral('This ticket panel has been removed or disabled.'));
-      await interaction.deferReply({ ephemeral: true });
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
       const result = await createTicket(guild, interaction.user, panel);
       return interaction.editReply(result.created ? `Your ticket is ready: ${result.channel}` : `You already have an open ticket: ${result.channel}`);
     }
@@ -838,7 +839,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
       if (ticket.ownerId !== interaction.user.id && !isTicketStaff(member, gData)) {
         return interaction.reply(ephemeral('Only the ticket owner or support staff can close this ticket.'));
       }
-      await interaction.deferReply({ ephemeral: true });
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
       await closeTicket(guild, interaction.channel, interaction.user, `Closed using ticket button by ${interaction.user.tag}`);
       return interaction.editReply('Ticket closed and transcript saved.');
     }
@@ -925,7 +926,7 @@ app.get('/api/guilds/:guildId/data', requireDashboard, async (req, res) => {
     .map(role => ({ id: role.id, name: role.name, position: role.position, color: role.hexColor }))
     .sort((a, b) => b.position - a.position);
   res.json({
-    guild: { id: guild.id, name: guild.name, memberCount: guild.memberCount, icon: guild.iconURL({ size: 96 }) },
+    guild: { id: guild.id, name: guild.name, memberCount: guild.memberCount, icon: guild.iconURL({ size: 128 }) },
     settings: gData.settings,
     logs: gData.logs.slice(0, 150),
     tickets: gData.tickets.slice(0, 150),
